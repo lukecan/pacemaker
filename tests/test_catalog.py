@@ -19,7 +19,7 @@ def test_library_bpm_is_kept_and_marked(tmp_path):
     assert catalog.import_library(con, SONGS) == 2
     rows = dict(con.execute("SELECT key, bpm_source FROM tracks").fetchall())
     assert rows == {"k1": None, "k2": "library"}
-    assert catalog.pending(con) == [("k1", "Song One", "Band A")]
+    assert catalog.pending(con) == [("k1", "Song One", "Band A", None)]
 
 
 def test_provider_never_overwrites_library_or_manual(tmp_path):

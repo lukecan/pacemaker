@@ -108,7 +108,7 @@ class GetSongBPM:
         if not self.api_key:
             raise RuntimeError("GETSONGBPM_API_KEY is not set")
 
-    def lookup(self, title: str, artist: str) -> dict:
+    def lookup(self, title: str, artist: str, isrc: str | None = None) -> dict:
         t, a = normalize_title(title), normalize_artist(artist)
         q = urllib.parse.urlencode({"type": "both", "lookup": f"song:{t} artist:{a}", "limit": "10"})
         url = f"https://api.getsongbpm.com/search/?{q}"
@@ -143,9 +143,14 @@ def parse_deezer_search(payload) -> list[dict]:
 class Deezer:
     """api.deezer.com - no API key needed.
 
-    BPM is often missing or zero, so this is a best-effort first pass rather
-    than a complete source. Search hits usually omit ``bpm``, so the full
-    track object is fetched for the closest few matches.
+    Looks a track up by ISRC first: one request, and it identifies the exact
+    recording. Without an ISRC it falls back to a plain text search. Search
+    results never carry ``bpm``, so the closest few hits are opened as full
+    track objects.
+
+    Deezer reports ``bpm = 0`` for some tracks; those count as not found.
+    The advanced ``track:"..." artist:"..."`` search syntax is deliberately
+    not used: it returns no results through this endpoint.
     """
     name = "deezer"
     needs_key = False
@@ -153,29 +158,36 @@ class Deezer:
     def __init__(self, probe: int = 3):
         self.probe = probe
 
-    def lookup(self, title: str, artist: str) -> dict:
-        t, a = normalize_title(title), normalize_artist(artist)
-        q = urllib.parse.urlencode({"q": f'track:"{t}" artist:"{a}"', "limit": "10"})
-        payload = _get_json(f"https://api.deezer.com/search?{q}")
-        cands = parse_deezer_search(payload)
-        hit = pick_best(cands, t, a)
-        if hit:
-            return {"bpm": hit["bpm"], "duration": hit.get("duration")}
+    def _track(self, ref) -> dict | None:
+        full = _get_json(f"https://api.deezer.com/track/{ref}")
+        if not isinstance(full, dict) or full.get("error"):
+            return None
+        parsed = parse_deezer_search([full])
+        return parsed[0] if parsed else None
 
-        # Search hits usually omit bpm, so fetch the closest few full tracks.
+    def lookup(self, title: str, artist: str, isrc: str | None = None) -> dict:
+        if isinstance(isrc, str) and isrc.strip():
+            hit = self._track(f"isrc:{urllib.parse.quote(isrc.strip().upper())}")
+            if hit and hit["bpm"]:
+                return {"bpm": hit["bpm"], "duration": hit.get("duration")}
+            known_duration = hit.get("duration") if hit else None
+        else:
+            known_duration = None
+
+        t, a = normalize_title(title), normalize_artist(artist)
+        q = urllib.parse.urlencode({"q": f"{t} {a}".strip(), "limit": "10"})
+        cands = parse_deezer_search(_get_json(f"https://api.deezer.com/search?{q}"))
         ranked = sorted(cands, key=lambda c: -(0.65 * _sim(c["title"], t) + 0.35 * _sim(c["artist"], a)))
-        fallback_duration = ranked[0].get("duration") if ranked else None
-        for c in ranked[: self.probe]:
-            if not c.get("id"):
+        if known_duration is None and ranked and pick_best([{**ranked[0], "bpm": 1.0}], t, a):
+            known_duration = ranked[0].get("duration")
+        for cand in ranked[: self.probe]:
+            # only open hits that plausibly are this song
+            if not cand.get("id") or not pick_best([{**cand, "bpm": 1.0}], t, a):
                 continue
-            full = _get_json(f"https://api.deezer.com/track/{c['id']}")
-            parsed = parse_deezer_search([full])
-            if not parsed:
-                continue
-            candidate = {**c, "bpm": parsed[0]["bpm"], "duration": parsed[0]["duration"] or c.get("duration")}
-            if candidate["bpm"] and pick_best([candidate], t, a):
-                return {"bpm": candidate["bpm"], "duration": candidate["duration"]}
-        return {"bpm": None, "duration": fallback_duration}
+            full = self._track(cand["id"])
+            if full and full["bpm"]:
+                return {"bpm": full["bpm"], "duration": full.get("duration") or cand.get("duration")}
+        return {"bpm": None, "duration": known_duration}
 
 
 PROVIDERS = {"getsongbpm": GetSongBPM, "deezer": Deezer}

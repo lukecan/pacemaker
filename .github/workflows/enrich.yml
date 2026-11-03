@@ -21,6 +21,10 @@ on:
       delay:
         description: "Seconds to wait between requests"
         default: "0.7"
+      retry_misses:
+        description: "Try again the songs earlier runs could not find"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -66,7 +70,11 @@ jobs:
           PROVIDER: ${{ inputs.provider }}
           LIMIT: ${{ inputs.limit }}
           DELAY: ${{ inputs.delay }}
-        run: pacemaker enrich --provider "$PROVIDER" --limit "$LIMIT" --delay "$DELAY"
+          RETRY: ${{ inputs.retry_misses }}
+        run: |
+          extra=""
+          if [ "$RETRY" = "true" ]; then extra="--retry-misses"; fi
+          pacemaker enrich --provider "$PROVIDER" --limit "$LIMIT" --delay "$DELAY" $extra
 
       - name: Write the state file and the web catalog
         run: |

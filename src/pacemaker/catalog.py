@@ -143,11 +143,20 @@ def import_bpm_csv(con: sqlite3.Connection, path: str) -> int:
 
 def pending(con: sqlite3.Connection, limit: int | None = None) -> list[tuple]:
     """Tracks still needing a BPM, favorites first."""
-    query = ("SELECT key,title,artist FROM tracks "
+    query = ("SELECT key,title,artist,isrc FROM tracks "
              "WHERE bpm IS NULL AND bpm_tried=0 ORDER BY favorite DESC, artist, title")
     if limit:
         query += f" LIMIT {int(limit)}"
     return con.execute(query).fetchall()
+
+
+def reset_misses(con: sqlite3.Connection) -> int:
+    """Forget earlier failed lookups so the next run tries them again."""
+    cur = con.execute(
+        "UPDATE tracks SET bpm_tried=0 WHERE bpm IS NULL "
+        "AND COALESCE(bpm_source,'') NOT IN ('manual','library')")
+    con.commit()
+    return cur.rowcount
 
 
 def all_tracks(con: sqlite3.Connection) -> pd.DataFrame:

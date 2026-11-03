@@ -39,6 +39,8 @@ def cmd_import_library(args):
 def cmd_enrich(args):
     chain = providers.build(args.provider)
     con = catalog.connect(args.db)
+    if args.retry_misses:
+        print(f"{catalog.reset_misses(con)} earlier misses will be tried again")
     todo = catalog.pending(con, args.limit)
     if not todo:
         print("nothing left to look up")
@@ -46,11 +48,11 @@ def cmd_enrich(args):
 
     print(f"looking up {len(todo)} songs via {', '.join(p.name for p in chain)}")
     found = consecutive_errors = 0
-    for index, (key, title, artist) in enumerate(todo, start=1):
+    for index, (key, title, artist, isrc) in enumerate(todo, start=1):
         bpm, duration, source = None, None, chain[0].name
         for provider in chain:
             try:
-                result = provider.lookup(title, artist)
+                result = provider.lookup(title, artist, isrc)
                 bpm, duration = result["bpm"], result.get("duration")
                 consecutive_errors = 0
             except urllib.error.HTTPError as exc:
@@ -58,7 +60,7 @@ def cmd_enrich(args):
                     print(f"  rate limited ({exc.code}), waiting 30s")
                     time.sleep(30)
                     try:
-                        result = provider.lookup(title, artist)
+                        result = provider.lookup(title, artist, isrc)
                         bpm, duration = result["bpm"], result.get("duration")
                     except Exception:
                         bpm = duration = None
@@ -224,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--provider", default="deezer,getsongbpm")
     p.add_argument("--limit", type=int, help="stop after this many songs")
     p.add_argument("--delay", type=float, default=1.0, help="seconds between requests")
+    p.add_argument("--retry-misses", action="store_true",
+                   help="try again the songs an earlier run could not find")
     p.set_defaults(func=cmd_enrich)
 
     p = sub.add_parser("import-bpm", help="load hand-checked BPM values (these win)")
