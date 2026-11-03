@@ -1,5 +1,9 @@
 """BPM providers.
 
+``lookup`` returns ``{"bpm": float | None, "duration": int | None}``. The
+duration matters because most library exports do not carry one, and without
+it a playlist cannot be built to a target length.
+
 HTTP and parsing are kept separate so the payload handling is unit-testable
 without network access.
 """
@@ -85,7 +89,8 @@ def parse_getsongbpm(payload) -> list[dict]:
             a = a[0] if a else {}
         name = a.get("name", "") if isinstance(a, dict) else str(a or "")
         out.append({"title": it.get("title", ""), "artist": name,
-                    "bpm": _as_float(it.get("tempo")), "id": it.get("id")})
+                    "bpm": _as_float(it.get("tempo")), "id": it.get("id"),
+                    "duration": None})
     return out
 
 
@@ -103,13 +108,13 @@ class GetSongBPM:
         if not self.api_key:
             raise RuntimeError("GETSONGBPM_API_KEY is not set")
 
-    def lookup(self, title: str, artist: str) -> float | None:
+    def lookup(self, title: str, artist: str) -> dict:
         t, a = normalize_title(title), normalize_artist(artist)
         q = urllib.parse.urlencode({"type": "both", "lookup": f"song:{t} artist:{a}", "limit": "10"})
         url = f"https://api.getsongbpm.com/search/?{q}"
         payload = _get_json(url, {"X-API-KEY": self.api_key})
         hit = pick_best(parse_getsongbpm(payload), t, a)
-        return hit["bpm"] if hit else None
+        return {"bpm": hit["bpm"], "duration": None} if hit else {"bpm": None, "duration": None}
 
 
 # -------------------------------------------------------------------- Deezer
@@ -123,9 +128,15 @@ def parse_deezer_search(payload) -> list[dict]:
         if not isinstance(it, dict):
             continue
         art = it.get("artist") or {}
+        duration = it.get("duration")
+        try:
+            duration = int(duration) if duration else None
+        except (TypeError, ValueError):
+            duration = None
         out.append({"title": it.get("title_short") or it.get("title", ""),
                     "artist": art.get("name", "") if isinstance(art, dict) else str(art),
-                    "bpm": _as_float(it.get("bpm")), "id": it.get("id")})
+                    "bpm": _as_float(it.get("bpm")), "id": it.get("id"),
+                    "duration": duration if duration and 10 <= duration <= 1800 else None})
     return out
 
 
@@ -142,26 +153,29 @@ class Deezer:
     def __init__(self, probe: int = 3):
         self.probe = probe
 
-    def lookup(self, title: str, artist: str) -> float | None:
+    def lookup(self, title: str, artist: str) -> dict:
         t, a = normalize_title(title), normalize_artist(artist)
         q = urllib.parse.urlencode({"q": f'track:"{t}" artist:"{a}"', "limit": "10"})
         payload = _get_json(f"https://api.deezer.com/search?{q}")
         cands = parse_deezer_search(payload)
         hit = pick_best(cands, t, a)
         if hit:
-            return hit["bpm"]
-        # bpm absent in search results: fetch the closest few full track objects
+            return {"bpm": hit["bpm"], "duration": hit.get("duration")}
+
+        # Search hits usually omit bpm, so fetch the closest few full tracks.
         ranked = sorted(cands, key=lambda c: -(0.65 * _sim(c["title"], t) + 0.35 * _sim(c["artist"], a)))
+        fallback_duration = ranked[0].get("duration") if ranked else None
         for c in ranked[: self.probe]:
             if not c.get("id"):
                 continue
             full = _get_json(f"https://api.deezer.com/track/{c['id']}")
-            bpm = _as_float(full.get("bpm") if isinstance(full, dict) else None)
-            if bpm:
-                c = {**c, "bpm": bpm}
-                if pick_best([c], t, a):
-                    return bpm
-        return None
+            parsed = parse_deezer_search([full])
+            if not parsed:
+                continue
+            candidate = {**c, "bpm": parsed[0]["bpm"], "duration": parsed[0]["duration"] or c.get("duration")}
+            if candidate["bpm"] and pick_best([candidate], t, a):
+                return {"bpm": candidate["bpm"], "duration": candidate["duration"]}
+        return {"bpm": None, "duration": fallback_duration}
 
 
 PROVIDERS = {"getsongbpm": GetSongBPM, "deezer": Deezer}

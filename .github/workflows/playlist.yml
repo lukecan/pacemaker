@@ -1,0 +1,81 @@
+name: Make a playlist
+
+# Builds one playlist from your library and the BPM values found so far.
+# The result is shown on the run page and committed under playlists/.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cadence:
+        description: "Your running cadence in steps per minute (Garmin, Strava and Apple show this number)"
+        default: "170"
+      minutes:
+        description: "Playlist length in minutes"
+        default: "60"
+      fresh:
+        description: "Percent of tracks you know least (0 = only familiar, 100 = only fresh)"
+        default: "30"
+      tolerance:
+        description: "How far a track's BPM may be from your cadence"
+        default: "3"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pacemaker-state
+  cancel-in-progress: false
+
+jobs:
+  playlist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e .
+
+      - name: Find the library export
+        id: find
+        run: |
+          file=$(ls library/*.csv library/*.xml 2>/dev/null | head -1 || true)
+          if [ -z "$file" ]; then
+            echo "::error::No library export found. Add one .csv or .xml file to library/ first."
+            exit 1
+          fi
+          echo "path=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Load the catalog
+        run: |
+          pacemaker import-library "${{ steps.find.outputs.path }}"
+          if [ -f bpm_state.csv ]; then pacemaker import-state bpm_state.csv; fi
+
+      - name: Build the playlist
+        id: build
+        env:
+          CADENCE: ${{ inputs.cadence }}
+          MINUTES: ${{ inputs.minutes }}
+          FRESH: ${{ inputs.fresh }}
+          TOLERANCE: ${{ inputs.tolerance }}
+        run: |
+          mkdir -p playlists
+          name="playlists/$(date -u +%Y-%m-%d)-${CADENCE}spm"
+          pacemaker generate --target "$CADENCE" --minutes "$MINUTES" \
+            --fresh "$FRESH" --tolerance "$TOLERANCE" --seed "$GITHUB_RUN_NUMBER" \
+            --out "$name.csv"
+          pacemaker export-state
+
+      - name: Commit the playlist and history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add playlists bpm_state.csv
+          if git diff --cached --quiet; then
+            echo "nothing changed"
+          else
+            git commit -m "chore: new playlist [skip ci]"
+            git push
+          fi

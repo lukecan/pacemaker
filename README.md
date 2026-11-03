@@ -2,14 +2,14 @@
 
 Build a playlist whose BPM matches your running cadence.
 
-You give it a Garmin activity file and an export of your own music library.
-It works out the cadence you actually ran at, finds the songs in *your*
-library whose tempo fits that cadence, and writes a playlist you can import
-into Apple Music or Spotify.
+You give it your running cadence and an export of your own Apple Music or
+Spotify library. It finds the songs in *your* library whose tempo fits that
+cadence and builds an hour-long playlist, mixing songs you know well with
+ones you rarely hear, in a proportion you choose.
 
 ```
-Garmin .fit ──> cadence analysis ──┐
-                                   ├──> BPM matching ──> playlist.csv / .txt
+your cadence (e.g. 170) ───────────┐
+                                   ├──> match ──> rotate ──> mix fresh/familiar ──> 60-minute playlist
 your library export ──> BPM lookup ┘
 ```
 
@@ -52,14 +52,34 @@ Everything below happens in a browser.
    will see something like:
 
    ```
-   songs 2764 | with BPM 612 | not yet looked up 2152
-   target 170 SPM, tolerance +/-2: 48 candidates (31 direct, 17 half-time)
+   songs 2764 | with BPM 612 | with length 590 | not yet looked up 2152
+   target 170 SPM, tolerance +/-3: 71 candidates (46 direct, 25 half-time)
    ```
 
-   Two files are committed back to your repository: `bpm_state.csv` (so the
-   next run resumes) and `web/catalog.json`.
-5. **Repeat** with a larger `limit` until you have enough candidates. Around
-   150 candidates is comfortable for a 30-song playlist.
+   `bpm_state.csv` is committed back to your repository, so the next run
+   resumes where this one stopped.
+5. **Repeat** with a larger `limit` until you have enough candidates. An
+   hour is roughly 15 songs; 100 or more candidates gives every playlist
+   room to be different from the last.
+6. **Make a playlist.** Go to **Actions → Make a playlist → Run workflow**
+   and fill in your cadence, length, and how fresh you want it. The playlist
+   appears on the run page and is saved under `playlists/` as a CSV and as a
+   text file for iOS Shortcuts.
+
+### What number is my cadence?
+
+The one your watch or app shows, in steps per minute — usually somewhere
+between 150 and 190.
+
+| App | Where |
+|---|---|
+| Garmin Connect | Activity → Avg Run Cadence |
+| Strava | Activity → Analysis → Cadence |
+| Apple Watch / Fitness | Workout summary → Avg Cadence |
+| Coros, Polar, Suunto | Activity details → Cadence |
+| No watch | Count your steps for 30 seconds and double it |
+
+If the number is around 80–95, that app is counting one foot. Double it.
 
 ### Better coverage: add a GetSongBPM key
 
@@ -78,11 +98,13 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest -q
 
-pacemaker analyze my-run.fit
 pacemaker import-library library/my-library.csv
 pacemaker enrich --provider deezer --limit 300
 pacemaker report --target 170
-pacemaker generate --target 170 --tolerance 2 --count 30 --prefer-favorites
+pacemaker generate --target 170 --minutes 60 --fresh 30
+
+# optional: read the cadence from a Garmin activity file instead
+pacemaker analyze my-run.fit
 ```
 
 | Command | What it does |
@@ -91,20 +113,37 @@ pacemaker generate --target 170 --tolerance 2 --count 30 --prefer-favorites
 | `import-library <file>` | Load a library export into the catalog |
 | `enrich` | Fill in missing BPM values from providers; resumable |
 | `report [--target]` | BPM coverage and candidate counts at tolerance 2, 3 and 4 |
-| `generate --target <spm>` | Write `playlist.csv` and `playlist.txt` |
+| `generate --target <spm>` | Write `playlist.csv` and `playlist.txt`; see options below |
 | `export-missing` / `import-bpm` | Dump songs with no BPM, fill them in, load them back |
 | `export-state` / `import-state` | State dump so a later run can resume |
-| `export-catalog` | Static `web/catalog.json` for a browser front-end |
+| `export-catalog` | Static `web/catalog.json` for a hosted front-end |
 
 Add `--db path/to/file.db` to any command to use a different catalog.
+
+`generate` options:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--minutes` | 60 | Stop at the track count that brings the total closest to this |
+| `--fresh` | off | Percent of tracks drawn from the ones you know least (0–100) |
+| `--tolerance` | 3 | How far a track's BPM may be from your cadence |
+| `--count` | 30 | Fixed number of tracks instead; use with `--minutes 0` |
+| `--assume-seconds` | 210 | Length used for tracks whose duration is unknown |
+| `--no-record` | off | Do not count this playlist towards rotation and familiarity |
+| `--seed` | 0 | Change to reshuffle ties |
 
 ## Library formats
 
 | Format | Notes |
 |---|---|
-| TuneMyMusic / Soundiiz CSV | `Track name`, `Artist name`, `Album`, `Playlist name`, `Type`, `ISRC`, `Apple - id`. `Album` and `Artist` rows are not songs and are dropped. |
-| Generic CSV | Any file with title and artist columns. A `bpm` column is used if present. |
-| iTunes / Apple Music `Library.xml` | Exported from the macOS Music app (**File → Library → Export Library**). Often already has BPM tags, which skips the lookup entirely. |
+| TuneMyMusic / Soundiiz CSV (Apple Music or Spotify) | `Track name`, `Artist name`, `Album`, `Playlist name`, `Type`, `ISRC`, `Apple - id`. `Album` and `Artist` rows are not songs and are dropped. |
+| Spotify export (e.g. Exportify) | `Track Name`, `Artist Name(s)`, `Duration (ms)`, `ISRC`, `Added At`. Carries durations and added dates. |
+| Generic CSV | Any file with title and artist columns. `bpm`, `duration`, `play count` and `added at` columns are used when present. |
+| iTunes / Apple Music `Library.xml` | Exported from the macOS Music app (**File → Library → Export Library**). Carries BPM tags, play counts, durations and added dates — the richest input. |
+
+Durations accept seconds, milliseconds or `m:ss`. When the export has none,
+the lookup fills them in where Deezer knows the track, and anything still
+unknown counts as 3½ minutes; the run output says how many were estimated.
 
 Songs are identified by ISRC where available, falling back to title + artist,
 so the same recording across several albums or playlists collapses into one
@@ -138,6 +177,35 @@ Writing directly to Apple Music from an app needs MusicKit, which requires
 the Apple Developer Program (currently 99 USD/year). That is deliberately out
 of scope here.
 
+## Fresh and familiar
+
+`--fresh 30` asks for roughly 30% of the playlist to come from the songs you
+know least. "Know" is worked out from whichever of these your export
+carries, each ranked within your library and then averaged:
+
+| Signal | Available from |
+|---|---|
+| How often pacemaker has already played it to you | every export, after your first playlist |
+| Marked as favorite / liked / loved | transfer-service CSV, iTunes XML |
+| How many of your own playlists hold it | transfer-service CSV |
+| Play count | iTunes XML |
+| How long ago you added it | Spotify export, iTunes XML |
+
+The candidates for a playlist are split at the median of that score: the
+lower half is "fresh", the upper half "familiar". A signal that none of your
+songs carry is left out rather than counted as zero, so a thin export still
+works; it just has less to go on.
+
+"Fresh" means fresh *to you within your library*. pacemaker never adds songs
+you do not already have, which is why every track in the playlist is already
+in your account.
+
+**Rotation** is separate and always on. Every candidate is already within
+tolerance, and a BPM or two is inaudible while running, so pacemaker does
+not rank candidates by closeness. It plays the ones it has served least
+often first. Consecutive playlists therefore do not repeat until the
+candidate pool is used up.
+
 ## How the matching works
 
 Garmin stores running cadence as **strides per minute** — one foot. The real
@@ -150,7 +218,7 @@ This matters only for the file. Garmin defines cadence as total steps
 doubled figure — around 170, not 85. The raw FIT field is the one that holds
 85, and reading it without doubling puts everything out by a factor of two.
 
-A track fits a target cadence two ways:
+A track fits a target cadence two ways (tolerance defaults to 3 BPM):
 
 - **direct** — one step per beat, so `|bpm − target| ≤ tolerance`
 - **half-time** — two steps per beat, so `|bpm × 2 − target| ≤ tolerance`
@@ -177,8 +245,8 @@ retried on every run.
 - Coverage depends entirely on BPM data being findable for your songs.
 - A single BPM per track assumes a steady tempo; songs that change tempo are
   matched on their reported average.
-- The playlist is currently ordered by closeness to the target, not shaped to
-  a workout. Phase-aware ordering is on the roadmap.
+- Track order within the playlist is not yet shaped to a workout (warm-up,
+  tempo, cool-down). Phase-aware ordering is on the roadmap.
 - Cycling and other cadence sports are not handled yet; the analysis assumes
   the running-cadence doubling rule.
 
@@ -188,7 +256,9 @@ retried on every run.
 - [x] Library import (transfer CSV, generic CSV, iTunes XML) and BPM store
 - [x] Direct and half-time matching, selection, CSV and Shortcuts output
 - [x] BPM lookup as a GitHub Actions workflow
-- [ ] Browser front-end: drop in a FIT file, get a playlist, nothing uploaded
+- [x] Hour-long playlists, rotation, and a fresh/familiar mix
+- [x] Spotify exports, durations, play counts and added dates
+- [ ] Hosted version: upload an export, get a playlist, no GitHub needed
 - [ ] Phase-aware ordering that follows the activity's cadence curve
 - [ ] Personal cadence profile from your last 10–20 runs
 - [ ] Spotify export

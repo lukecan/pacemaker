@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 import urllib.error
 
@@ -46,26 +47,28 @@ def cmd_enrich(args):
     print(f"looking up {len(todo)} songs via {', '.join(p.name for p in chain)}")
     found = consecutive_errors = 0
     for index, (key, title, artist) in enumerate(todo, start=1):
-        bpm, source = None, chain[0].name
+        bpm, duration, source = None, None, chain[0].name
         for provider in chain:
             try:
-                bpm = provider.lookup(title, artist)
+                result = provider.lookup(title, artist)
+                bpm, duration = result["bpm"], result.get("duration")
                 consecutive_errors = 0
             except urllib.error.HTTPError as exc:
                 if exc.code in (429, 503):
                     print(f"  rate limited ({exc.code}), waiting 30s")
                     time.sleep(30)
                     try:
-                        bpm = provider.lookup(title, artist)
+                        result = provider.lookup(title, artist)
+                        bpm, duration = result["bpm"], result.get("duration")
                     except Exception:
-                        bpm = None
+                        bpm = duration = None
                 else:
                     print(f"  {provider.name} HTTP {exc.code}: {title}")
-                    bpm = None
+                    bpm = duration = None
             except Exception as exc:
                 consecutive_errors += 1
                 print(f"  {provider.name} failed ({type(exc).__name__}): {title}")
-                bpm = None
+                bpm = duration = None
                 if consecutive_errors >= 10:
                     con.commit()
                     print("too many consecutive errors, stopping; "
@@ -75,7 +78,7 @@ def cmd_enrich(args):
                 source = provider.name
                 break
 
-        catalog.set_bpm(con, key, bpm, source)
+        catalog.set_bpm(con, key, bpm, source, duration)
         found += bpm is not None
         if index % 25 == 0:
             con.commit()
@@ -120,6 +123,7 @@ def cmd_report(args):
     df = catalog.all_tracks(con)
     has_bpm = df["bpm"].notna()
     print(f"songs {len(df)} | with BPM {int(has_bpm.sum())} "
+          f"| with length {int(df['duration_sec'].notna().sum())} "
           f"| not yet looked up {int((df['bpm_tried'] == 0).sum())}")
     if has_bpm.any():
         print(df[has_bpm]["bpm_source"].value_counts().to_string())
@@ -140,12 +144,16 @@ def cmd_generate(args):
     direct = int((matched["match"] == "direct").sum())
     print(f"candidates: {len(matched)} ({direct} direct, {len(matched) - direct} half-time)")
 
-    selected = matching.select(matched, args.count, args.seed, args.prefer_favorites)
+    fresh = None if args.fresh is None else max(0.0, min(100.0, args.fresh)) / 100.0
+    selected = matching.assemble(
+        matched, minutes=args.minutes or None, count=args.count, fresh=fresh,
+        seed=args.seed, prefer_favorites=args.prefer_favorites,
+        assume_seconds=args.assume_seconds)
     if selected.empty:
         print("no candidates; widen --tolerance or look up more BPM values")
         return
 
-    columns = ["title", "artist", "album", "isrc", "bpm", "match", "source_id"]
+    columns = ["title", "artist", "album", "isrc", "bpm", "match", "fresh", "source_id"]
     playlist = selected[columns].copy()
     playlist["bpm"] = playlist["bpm"].round(1)
     playlist.to_csv(args.out, index=False)
@@ -156,11 +164,45 @@ def cmd_generate(args):
             fh.write(f"{row.title}|{row.artist}\n")
 
     print(playlist.to_string(index=False))
-    print(f"\n{len(selected)} songs -> {args.out}")
+    seconds, unknown = matching.playlist_seconds(selected, args.assume_seconds)
+    length = f"{seconds // 60} min {seconds % 60:02d} s"
+    if unknown:
+        length += f" (estimated; {unknown} track(s) had no known length)"
+    print(f"\n{len(selected)} songs, {length} -> {args.out}")
     print(f"pipe-separated list for iOS Shortcuts -> {text_path}")
-    if len(selected) < args.count:
+    if fresh is not None:
+        share = 100.0 * selected["fresh"].mean()
+        print(f"fresh tracks: {int(selected['fresh'].sum())} of {len(selected)} "
+              f"({share:.0f}%, asked for {args.fresh:g}%)")
+    if not args.no_record:
+        from datetime import date
+        catalog.record_served(con, list(selected["key"]), date.today().isoformat())
+
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        _write_summary(summary, playlist, args, length)
+    if args.minutes and seconds < args.minutes * 60:
+        print(f"short of the {args.minutes:g}-minute target; "
+              "widen --tolerance or look up more BPM values")
+    elif not args.minutes and len(selected) < args.count:
         print(f"only {len(selected)} of {args.count} found; "
               "widen --tolerance or look up more BPM values")
+
+
+def _write_summary(path, playlist, args, length):
+    """Show the playlist on the GitHub Actions run page."""
+    def esc(text):
+        return str(text).replace("|", "\\|")
+    lines = [f"## {args.target:g} SPM, {length}", ""]
+    if args.fresh is not None:
+        lines.append(f"Fresh share asked for: {args.fresh:g}%")
+        lines.append("")
+    lines += ["| # | Title | Artist | BPM | Match | Fresh |", "|---|---|---|---|---|---|"]
+    for n, row in enumerate(playlist.itertuples(index=False), start=1):
+        lines.append(f"| {n} | {esc(row.title)} | {esc(row.artist)} | {row.bpm:g} "
+                     f"| {row.match} | {'yes' if row.fresh else ''} |")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -210,10 +252,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("generate", help="write a playlist CSV and a Shortcuts text file")
     p.add_argument("--target", type=float, required=True, help="target cadence in SPM")
-    p.add_argument("--tolerance", type=float, default=2.0, help="allowed BPM distance")
-    p.add_argument("-n", "--count", type=int, default=30)
+    p.add_argument("--tolerance", type=float, default=3.0, help="allowed BPM distance (default: 3)")
+    p.add_argument("--minutes", type=float, default=60.0,
+                   help="fill the playlist to this many minutes (default: 60)")
+    p.add_argument("-n", "--count", type=int, default=30,
+                   help="use a fixed song count instead; pass --minutes 0 to enable")
+    p.add_argument("--assume-seconds", type=int, default=matching.DEFAULT_TRACK_SECONDS,
+                   help="length assumed for tracks with no known duration")
     p.add_argument("--no-direct", action="store_true", help="skip one-step-per-beat matches")
     p.add_argument("--no-half-time", action="store_true", help="skip two-steps-per-beat matches")
+    p.add_argument("--fresh", type=float, default=None, metavar="PERCENT",
+                   help="share of the playlist taken from tracks you know least "
+                        "(0-100; default: ignore familiarity)")
+    p.add_argument("--no-record", action="store_true",
+                   help="do not remember this playlist (it then does not count "
+                        "towards familiarity next time)")
     p.add_argument("--prefer-favorites", action="store_true")
     p.add_argument("--seed", type=int, default=0, help="change for a different playlist")
     p.add_argument("--out", default="playlist.csv")
