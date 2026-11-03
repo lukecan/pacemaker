@@ -27,7 +27,7 @@ from somewhere else, and that is what most of this project is about:
 | Source | Cost | Coverage |
 |---|---|---|
 | BPM already tagged in your library | free | whatever you have tagged; common for DJ and local libraries |
-| [Deezer API](https://developers.deezer.com/api) | free, no key | partial — the `bpm` field is often missing |
+| [Deezer API](https://developers.deezer.com/api) | free, no key | good — 23 of 30 in a mixed spot check (rock, pop, Turkish); some tracks report `bpm = 0` |
 | [GetSongBPM](https://getsongbpm.com) | free, needs an API key | good, and the usual fallback |
 | Filling gaps by hand | your time | exact |
 
