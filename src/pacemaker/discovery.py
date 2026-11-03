@@ -32,6 +32,19 @@ def _norm(text: str) -> str:
     return " ".join(str(text or "").lower().split())
 
 
+def seed_name(artist: str) -> str:
+    """Artist name for an artist search: drop featured guests, keep the band.
+
+    ``normalize_artist`` also splits on "&" so that duets match a single
+    artist in track searches, but that turns "Mumford & Sons" into
+    "Mumford", which Deezer's artist search cannot find.
+    """
+    import re
+    name = re.split(r"\s+(?:feat\.?|ft\.?|featuring)\s+|\s*,\s*", str(artist or ""),
+                    maxsplit=1, flags=re.IGNORECASE)[0]
+    return " ".join(name.split())
+
+
 def seed_artists(library: pd.DataFrame, count: int = 30) -> list[tuple[str, float]]:
     """The listener's artists, heaviest first, as ``(name, weight)``."""
     lib = library[library.get("origin", pd.Series("library", index=library.index))
@@ -39,7 +52,7 @@ def seed_artists(library: pd.DataFrame, count: int = 30) -> list[tuple[str, floa
     weights: dict[str, float] = defaultdict(float)
     display: dict[str, str] = {}
     for row in lib.itertuples(index=False):
-        name = normalize_artist(row.artist)
+        name = seed_name(row.artist)
         if not name:
             continue
         key = _norm(name)

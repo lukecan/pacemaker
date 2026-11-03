@@ -161,3 +161,13 @@ def test_no_fresh_means_no_discoveries(fake_deezer, con):
     for fresh in (None, 0):
         playlist = assemble(pool, minutes=None, count=10, fresh=fresh)
         assert not (playlist.get("origin", pd.Series(dtype=str)) == "discovery").any()
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Mumford & Sons", "Mumford & Sons"),
+    ("Daryl Hall & John Oates", "Daryl Hall & John Oates"),
+    ("Gorillaz feat. De La Soul", "Gorillaz"),
+    ("Mark Ronson, Bruno Mars", "Mark Ronson"),
+])
+def test_seed_names_keep_band_names_whole(raw, expected):
+    assert discovery.seed_name(raw) == expected
