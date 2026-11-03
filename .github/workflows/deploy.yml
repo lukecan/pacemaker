@@ -64,7 +64,16 @@ jobs:
       - name: Deploy
         if: steps.creds.outputs.ready == 'true'
         run: |
-          npx wrangler deploy | tee deploy.log
+          set -o pipefail
+          npx wrangler deploy < /dev/null 2>&1 | tee deploy.log
           url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then
+            if grep -q "register a workers.dev subdomain" deploy.log; then
+              echo "::error::Your Cloudflare account has no workers.dev subdomain yet. In the Cloudflare dashboard open Workers & Pages and choose one, then run this workflow again."
+            else
+              echo "::error::Deploy finished without a workers.dev address; see the log above."
+            fi
+            exit 1
+          fi
           echo "### pacemaker is live" >> "$GITHUB_STEP_SUMMARY"
           echo "$url" >> "$GITHUB_STEP_SUMMARY"
