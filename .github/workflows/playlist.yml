@@ -23,6 +23,11 @@ on:
       tolerance:
         description: "How far a track's BPM may be from your cadence"
         default: "3"
+      lang:
+        description: "Language of the playlist name"
+        type: choice
+        default: tr
+        options: [tr, en]
 
 permissions:
   contents: write
@@ -69,11 +74,12 @@ jobs:
           MINUTES: ${{ inputs.minutes || '60' }}
           FRESH: ${{ inputs.fresh || '30' }}
           TOLERANCE: ${{ inputs.tolerance || '3' }}
+          LANG_NAME: ${{ inputs.lang || 'tr' }}
         run: |
           mkdir -p playlists
           name="playlists/$(date -u +%Y-%m-%d)-${CADENCE}spm"
           pacemaker generate --target "$CADENCE" --minutes "$MINUTES" \
-            --fresh "$FRESH" --tolerance "$TOLERANCE" --seed "$GITHUB_RUN_NUMBER" \
+            --fresh "$FRESH" --tolerance "$TOLERANCE" --seed "$GITHUB_RUN_NUMBER" --lang "$LANG_NAME" \
             --out "$name.csv"
           pacemaker export-state
 

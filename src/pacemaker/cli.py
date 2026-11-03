@@ -190,8 +190,11 @@ def cmd_generate(args):
     # Same columns as a TuneMyMusic library export, so the file can be
     # imported straight back through TuneMyMusic into any service.
     from datetime import date as _date
+    from .names import playlist_name as _pun_name, playlist_seed
     transfer_path = args.out.rsplit(".", 1)[0] + ".tunemymusic.csv"
-    playlist_name = f"pacemaker {args.target:g} SPM {_date.today().isoformat()}"
+    playlist_name = (_pun_name(playlist_seed(selected["key"], args.target), args.lang)
+                     or f"pacemaker {args.target:g} SPM {_date.today().isoformat()}")
+    print(f"name: {playlist_name}")
     pd.DataFrame({
         "Track name": playlist["title"],
         "Artist name": playlist["artist"],
@@ -308,7 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_import_state)
 
     p = sub.add_parser("export-catalog", help="write the static JSON for the web front-end")
-    p.add_argument("--out", default="web/catalog.json")
+    p.add_argument("--out", default="catalog.json")
     p.set_defaults(func=cmd_export_catalog)
 
     p = sub.add_parser("discover", help="find songs you do not have, by artists like yours")
@@ -351,6 +354,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prefer-favorites", action="store_true")
     p.add_argument("--seed", type=int, default=0, help="change for a different playlist")
     p.add_argument("--out", default="playlist.csv")
+    p.add_argument("--lang", choices=["en", "tr"], default="en", help="language of the playlist name")
     p.set_defaults(func=cmd_generate)
 
     return parser

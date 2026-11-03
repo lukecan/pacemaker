@@ -91,19 +91,17 @@ jobs:
         if: ${{ github.event_name == 'push' || inputs.discover }}
         run: pacemaker discover
 
-      - name: Write the state file and the web catalog
+      - name: Write the state files
         run: |
-          mkdir -p web
           pacemaker export-state
           pacemaker export-discovery
-          pacemaker export-catalog
           pacemaker report
 
       - name: Commit the results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bpm_state.csv discovery.csv web/catalog.json
+          git add bpm_state.csv discovery.csv
           if git diff --cached --quiet; then
             echo "nothing changed"
           else

@@ -16,6 +16,48 @@ your library export ──> BPM lookup ┘
 No paid API, no developer account, no server. Your library and your activity
 files stay in your own copy of this repo.
 
+## The website
+
+`site/` and `worker/` are a website anyone can use, with no account and no
+install: enter your cadence, drop in your library export, choose a length and
+how much new music you want, and download a playlist to import with a transfer
+service. Playlists get running-pun names (*Stride & Prejudice · Golden Hour
+No. 12*, *Uzun Koşu Uzun Hava · Sahil Turu No. 7*) and can be shared to a
+public gallery that anyone can browse by cadence.
+
+- **Your library stays in your browser.** Only the titles of songs whose tempo
+  is unknown are sent, to look them up.
+- **Tempos are shared.** Every lookup is cached for everyone in Cloudflare D1,
+  so the first person to ask about a song pays for it and nobody else does.
+- **Shared playlists only carry metadata from Deezer**, never text from an
+  upload, and sharing is limited per visitor per day.
+
+It runs on one Cloudflare Worker on the free plan: 100,000 requests a day,
+and each request stays under the 50 outbound calls a Worker may make.
+
+### Deploying it
+
+1. Create a free [Cloudflare](https://dash.cloudflare.com/sign-up) account and
+   open **Workers & Pages** once, so it gives you a `workers.dev` subdomain.
+2. **My Profile → API Tokens → Create Token**, start from the *Edit Cloudflare
+   Workers* template, add **Account · D1 · Edit**, and create it.
+3. In this repository, **Settings → Secrets and variables → Actions**, add
+   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (the account ID is on the
+   Workers & Pages overview).
+4. **Actions → Deploy website → Run workflow.** The first run creates the
+   database; the run summary shows the live address.
+
+After that, every change to `site/` or `worker/` deploys itself.
+
+### Running it locally
+
+```bash
+npm install
+npx wrangler d1 migrations apply pacemaker --local
+npx wrangler dev --local
+npm test
+```
+
 ## The honest part: BPM is the hard problem
 
 Matching cadence to tempo is easy. Knowing the tempo of your songs is not.
