@@ -18,7 +18,7 @@ on:
         description: "Playlist length in minutes"
         default: "60"
       fresh:
-        description: "Percent of tracks you know least (0 = only familiar, 100 = only fresh)"
+        description: "Percent of songs that are new to you, not in your library (0 = only your own)"
         default: "30"
       tolerance:
         description: "How far a track's BPM may be from your cadence"
@@ -59,6 +59,7 @@ jobs:
       - name: Load the catalog
         run: |
           pacemaker import-library "${{ steps.find.outputs.path }}"
+          if [ -f discovery.csv ]; then pacemaker import-discovery discovery.csv; fi
           if [ -f bpm_state.csv ]; then pacemaker import-state bpm_state.csv; fi
 
       - name: Build the playlist

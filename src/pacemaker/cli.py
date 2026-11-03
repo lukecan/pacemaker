@@ -6,7 +6,9 @@ import os
 import time
 import urllib.error
 
-from . import catalog, fit_parser, library, matching, providers
+import pandas as pd
+
+from . import catalog, discovery, fit_parser, library, matching, providers
 
 DEFAULT_DB = "pacemaker.db"
 
@@ -120,10 +122,32 @@ def cmd_export_catalog(args):
     print(f"{catalog.export_catalog(con, args.out)} songs -> {args.out}")
 
 
+def cmd_discover(args):
+    con = catalog.connect(args.db)
+    discovery.discover(con, seeds=args.seeds, artists=args.artists,
+                       per_artist=args.per_artist, delay=args.delay)
+
+
+def cmd_export_discovery(args):
+    con = catalog.connect(args.db)
+    print(f"{catalog.export_discovery(con, args.out)} discovered songs -> {args.out}")
+
+
+def cmd_import_discovery(args):
+    con = catalog.connect(args.db)
+    print(f"{catalog.import_discovery(con, args.csv)} discovered songs restored")
+
+
 def cmd_report(args):
     con = catalog.connect(args.db)
     df = catalog.all_tracks(con)
+    found = df[df["origin"].fillna("library") == "discovery"]
+    df = df[df["origin"].fillna("library") != "discovery"]
     has_bpm = df["bpm"].notna()
+    if len(found):
+        m = matching.match_tracks(found, args.target, 3)
+        print(f"discovered (not in your library): {len(found)} | with BPM "
+              f"{int(found['bpm'].notna().sum())} | fit {args.target:g} SPM +/-3: {len(m)}")
     print(f"songs {len(df)} | with BPM {int(has_bpm.sum())} "
           f"| with length {int(df['duration_sec'].notna().sum())} "
           f"| not yet looked up {int((df['bpm_tried'] == 0).sum())}")
@@ -155,7 +179,10 @@ def cmd_generate(args):
         print("no candidates; widen --tolerance or look up more BPM values")
         return
 
-    columns = ["title", "artist", "album", "isrc", "bpm", "match", "fresh", "source_id"]
+    selected = selected.copy()
+    origin = selected["origin"] if "origin" in selected else pd.Series("library", index=selected.index)
+    selected["new"] = origin.fillna("library").eq("discovery")
+    columns = ["title", "artist", "album", "isrc", "bpm", "match", "new", "fresh", "source_id"]
     playlist = selected[columns].copy()
     playlist["bpm"] = playlist["bpm"].round(1)
     playlist.to_csv(args.out, index=False)
@@ -173,9 +200,18 @@ def cmd_generate(args):
     print(f"\n{len(selected)} songs, {length} -> {args.out}")
     print(f"pipe-separated list for iOS Shortcuts -> {text_path}")
     if fresh is not None:
-        share = 100.0 * selected["fresh"].mean()
-        print(f"fresh tracks: {int(selected['fresh'].sum())} of {len(selected)} "
-              f"({share:.0f}%, asked for {args.fresh:g}%)")
+        new = int(selected["new"].sum())
+        if new or ("origin" in matched and matched["origin"].eq("discovery").any()):
+            print(f"new to you (not in your library): {new} of {len(selected)} "
+                  f"({100.0 * new / len(selected):.0f}%, asked for {args.fresh:g}%)")
+            if 100.0 * new / len(selected) + 5 < args.fresh:
+                print("  not enough discovered songs fit this cadence; run discover again "
+                      "or widen --tolerance")
+        else:
+            share = 100.0 * selected["fresh"].mean()
+            print(f"least-familiar library tracks: {int(selected['fresh'].sum())} of "
+                  f"{len(selected)} ({share:.0f}%, asked for {args.fresh:g}%; "
+                  "run discover to get songs you do not have yet)")
     if not args.no_record:
         from datetime import date
         catalog.record_served(con, list(selected["key"]), date.today().isoformat())
@@ -183,7 +219,9 @@ def cmd_generate(args):
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         _write_summary(summary, playlist, args, length)
-    if args.minutes and seconds < args.minutes * 60:
+    # The cut lands on whichever side of the target is closer, so a few
+    # minutes under is expected; only warn when candidates actually ran out.
+    if args.minutes and seconds < args.minutes * 60 * 0.9:
         print(f"short of the {args.minutes:g}-minute target; "
               "widen --tolerance or look up more BPM values")
     elif not args.minutes and len(selected) < args.count:
@@ -193,16 +231,24 @@ def cmd_generate(args):
 
 def _write_summary(path, playlist, args, length):
     """Show the playlist on the GitHub Actions run page."""
+    from urllib.parse import quote
+
     def esc(text):
         return str(text).replace("|", "\\|")
+    new = int(playlist["new"].sum())
     lines = [f"## {args.target:g} SPM, {length}", ""]
     if args.fresh is not None:
-        lines.append(f"Fresh share asked for: {args.fresh:g}%")
+        lines.append(f"New to you: {new} of {len(playlist)} (asked for {args.fresh:g}%). "
+                     "New songs are not in your library yet; the link opens them in Apple Music.")
         lines.append("")
-    lines += ["| # | Title | Artist | BPM | Match | Fresh |", "|---|---|---|---|---|---|"]
+    lines += ["| # | Title | Artist | BPM | Match | New |", "|---|---|---|---|---|---|"]
     for n, row in enumerate(playlist.itertuples(index=False), start=1):
+        mark = ""
+        if row.new:
+            term = quote(f"{row.title} {row.artist}")
+            mark = f"[new](https://music.apple.com/search?term={term})"
         lines.append(f"| {n} | {esc(row.title)} | {esc(row.artist)} | {row.bpm:g} "
-                     f"| {row.match} | {'yes' if row.fresh else ''} |")
+                     f"| {row.match} | {mark} |")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 
@@ -250,6 +296,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="web/catalog.json")
     p.set_defaults(func=cmd_export_catalog)
 
+    p = sub.add_parser("discover", help="find songs you do not have, by artists like yours")
+    p.add_argument("--seeds", type=int, default=30, help="how many of your artists to start from")
+    p.add_argument("--artists", type=int, default=80, help="how many similar artists to use")
+    p.add_argument("--per-artist", type=int, default=10, help="top songs to check per artist")
+    p.add_argument("--delay", type=float, default=0.25, help="seconds between requests")
+    p.set_defaults(func=cmd_discover)
+
+    p = sub.add_parser("export-discovery", help="save discovered songs so a later run keeps them")
+    p.add_argument("--out", default="discovery.csv")
+    p.set_defaults(func=cmd_export_discovery)
+
+    p = sub.add_parser("import-discovery", help="restore discovered songs")
+    p.add_argument("csv")
+    p.set_defaults(func=cmd_import_discovery)
+
     p = sub.add_parser("report", help="show BPM coverage and candidate counts")
     p.add_argument("--target", type=float, default=170.0)
     p.set_defaults(func=cmd_report)
@@ -266,8 +327,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-direct", action="store_true", help="skip one-step-per-beat matches")
     p.add_argument("--no-half-time", action="store_true", help="skip two-steps-per-beat matches")
     p.add_argument("--fresh", type=float, default=None, metavar="PERCENT",
-                   help="share of the playlist taken from tracks you know least "
-                        "(0-100; default: ignore familiarity)")
+                   help="share of the playlist that is new to you: discovered songs you "
+                        "do not have yet, or your least familiar ones if discover has "
+                        "not run (0-100; default: library only)")
     p.add_argument("--no-record", action="store_true",
                    help="do not remember this playlist (it then does not count "
                         "towards familiarity next time)")

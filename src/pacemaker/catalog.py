@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS tracks (
     play_count  INTEGER,
     added_at    TEXT,
     served_count INTEGER DEFAULT 0,
-    last_served TEXT
+    last_served TEXT,
+    origin      TEXT DEFAULT 'library',
+    deezer_id   TEXT,
+    seed        TEXT
 );
 CREATE INDEX IF NOT EXISTS tracks_bpm ON tracks (bpm);
 """
@@ -45,6 +48,7 @@ def connect(path: str) -> sqlite3.Connection:
     added = {  # columns introduced after the first release
         "duration_sec": "INTEGER", "play_count": "INTEGER", "added_at": "TEXT",
         "served_count": "INTEGER DEFAULT 0", "last_served": "TEXT",
+        "origin": "TEXT DEFAULT 'library'", "deezer_id": "TEXT", "seed": "TEXT",
     }
     for name, kind in added.items():
         if name not in columns:
@@ -67,6 +71,7 @@ def import_library(con: sqlite3.Connection, lib: pd.DataFrame) -> int:
             "bpm,bpm_source,bpm_tried,duration_sec,play_count,added_at) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(key) DO UPDATE SET "
+            "  origin='library', "
             "  favorite=excluded.favorite, playlists=excluded.playlists, "
             "  play_count=excluded.play_count, added_at=excluded.added_at, "
             "  duration_sec=COALESCE(excluded.duration_sec, tracks.duration_sec), "
@@ -157,6 +162,47 @@ def reset_misses(con: sqlite3.Connection) -> int:
         "AND COALESCE(bpm_source,'') NOT IN ('manual','library')")
     con.commit()
     return cur.rowcount
+
+
+DISCOVERY_COLUMNS = ["key", "title", "artist", "album", "isrc", "deezer_id",
+                     "duration_sec", "bpm", "seed"]
+
+
+def add_discovered(con: sqlite3.Connection, row: dict) -> bool:
+    """Store a song found by discovery. Songs already in the library are
+    never turned into discoveries. Returns True if it was new."""
+    cur = con.execute(
+        "INSERT INTO tracks (key,title,artist,album,isrc,deezer_id,duration_sec,bpm,seed,"
+        "origin,bpm_source,bpm_tried,favorite,playlists) "
+        "VALUES (?,?,?,?,?,?,?,?,?,'discovery','deezer',1,0,'') "
+        "ON CONFLICT(key) DO NOTHING",
+        tuple(row.get(c) for c in DISCOVERY_COLUMNS))
+    return cur.rowcount > 0
+
+
+def known_deezer_ids(con: sqlite3.Connection) -> set[str]:
+    return {str(r[0]) for r in con.execute(
+        "SELECT deezer_id FROM tracks WHERE deezer_id IS NOT NULL")}
+
+
+def export_discovery(con: sqlite3.Connection, path: str) -> int:
+    df = pd.read_sql(
+        f"SELECT {','.join(DISCOVERY_COLUMNS)} FROM tracks WHERE origin='discovery' ORDER BY key", con)
+    df.to_csv(path, index=False)
+    return len(df)
+
+
+def import_discovery(con: sqlite3.Connection, path: str) -> int:
+    df = pd.read_csv(path, encoding="utf-8-sig", dtype={"deezer_id": str, "isrc": str})
+    added = 0
+    for row in df.to_dict("records"):
+        clean = {k: (None if (v is None or (isinstance(v, float) and pd.isna(v))) else v)
+                 for k, v in row.items()}
+        if clean.get("duration_sec") is not None:
+            clean["duration_sec"] = int(clean["duration_sec"])
+        added += add_discovered(con, clean)
+    con.commit()
+    return added
 
 
 def all_tracks(con: sqlite3.Connection) -> pd.DataFrame:

@@ -8,7 +8,7 @@ on:
   # Runs by itself whenever a library export is added or replaced.
   push:
     branches: [main]
-    paths: ["library/**"]
+    paths: ["library/**", ".github/workflows/enrich.yml"]
   workflow_dispatch:
     inputs:
       provider:
@@ -29,6 +29,10 @@ on:
         description: "Try again the songs earlier runs could not find"
         type: boolean
         default: false
+      discover:
+        description: "Also look for new songs by artists like yours"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -64,9 +68,8 @@ jobs:
       - name: Build the catalog and restore what is already known
         run: |
           pacemaker import-library "${{ steps.find.outputs.path }}"
-          if [ -f bpm_state.csv ]; then
-            pacemaker import-state bpm_state.csv
-          fi
+          if [ -f discovery.csv ]; then pacemaker import-discovery discovery.csv; fi
+          if [ -f bpm_state.csv ]; then pacemaker import-state bpm_state.csv; fi
 
       - name: Look up missing BPM values
         env:
@@ -80,10 +83,15 @@ jobs:
           if [ "$RETRY" = "true" ]; then extra="--retry-misses"; fi
           pacemaker enrich --provider "$PROVIDER" --limit "$LIMIT" --delay "$DELAY" $extra
 
+      - name: Discover new songs
+        if: ${{ github.event_name == 'push' || inputs.discover }}
+        run: pacemaker discover
+
       - name: Write the state file and the web catalog
         run: |
           mkdir -p web
           pacemaker export-state
+          pacemaker export-discovery
           pacemaker export-catalog
           pacemaker report
 
@@ -91,7 +99,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bpm_state.csv web/catalog.json
+          git add bpm_state.csv discovery.csv web/catalog.json
           if git diff --cached --quiet; then
             echo "nothing changed"
           else

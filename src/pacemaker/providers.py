@@ -133,10 +133,13 @@ def parse_deezer_search(payload) -> list[dict]:
             duration = int(duration) if duration else None
         except (TypeError, ValueError):
             duration = None
+        album = it.get("album") or {}
         out.append({"title": it.get("title_short") or it.get("title", ""),
                     "artist": art.get("name", "") if isinstance(art, dict) else str(art),
                     "bpm": _as_float(it.get("bpm")), "id": it.get("id"),
-                    "duration": duration if duration and 10 <= duration <= 1800 else None})
+                    "duration": duration if duration and 10 <= duration <= 1800 else None,
+                    "isrc": it.get("isrc") or None,
+                    "album": album.get("title", "") if isinstance(album, dict) else ""})
     return out
 
 
@@ -188,6 +191,42 @@ class Deezer:
             if full and full["bpm"]:
                 return {"bpm": full["bpm"], "duration": full.get("duration") or cand.get("duration")}
         return {"bpm": None, "duration": known_duration}
+
+
+# ------------------------------------------------------ Deezer discovery
+
+def deezer_find_artist(name: str) -> dict | None:
+    """Best artist match for a name, or None. Picks by name similarity, then
+    by fan count, so "The Strokes" does not resolve to "The Rolling Stones"."""
+    q = urllib.parse.urlencode({"q": name, "limit": "5"})
+    data = _get_json(f"https://api.deezer.com/search/artist?{q}")
+    hits = [h for h in (data.get("data") if isinstance(data, dict) else None) or []
+            if isinstance(h, dict) and h.get("id")]
+    if not hits:
+        return None
+    scored = sorted(hits, key=lambda h: (-_sim(h.get("name", ""), name), -(h.get("nb_fan") or 0)))
+    best = scored[0]
+    return best if _sim(best.get("name", ""), name) >= 0.8 else None
+
+
+def deezer_related(artist_id, limit: int = 20) -> list[dict]:
+    data = _get_json(f"https://api.deezer.com/artist/{artist_id}/related?limit={int(limit)}")
+    return [a for a in (data.get("data") if isinstance(data, dict) else None) or []
+            if isinstance(a, dict) and a.get("id")]
+
+
+def deezer_top_tracks(artist_id, limit: int = 10) -> list[dict]:
+    data = _get_json(f"https://api.deezer.com/artist/{artist_id}/top?limit={int(limit)}")
+    return parse_deezer_search(data)
+
+
+def deezer_track(track_id) -> dict | None:
+    """Full track: the only Deezer object that carries ``bpm`` and ``isrc``."""
+    data = _get_json(f"https://api.deezer.com/track/{track_id}")
+    if not isinstance(data, dict) or data.get("error"):
+        return None
+    parsed = parse_deezer_search([data])
+    return parsed[0] if parsed else None
 
 
 PROVIDERS = {"getsongbpm": GetSongBPM, "deezer": Deezer}

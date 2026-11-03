@@ -157,12 +157,22 @@ def assemble(matched: pd.DataFrame, *, minutes: float | None = 60.0, count: int 
     playlists come first, with ties broken by ``seed``. That keeps one week's
     playlist from repeating the last.
 
-    ``fresh`` is the share of the playlist, 0..1, that should come from the
-    less familiar half of the candidates (see ``familiarity``). ``None``
-    ignores familiarity.
+    ``fresh`` is the share of the playlist, 0..1, that should be new to the
+    listener. When the catalog holds discovered songs (``origin ==
+    'discovery'``), "new" means those: songs the listener does not have yet.
+    If there are not enough at this cadence, the rest is filled from the
+    library. Without any discoveries, "new" falls back to the less familiar
+    half of the library (see ``familiarity``).
+
+    With ``fresh`` unset or 0, discovered songs are left out entirely.
     """
     if matched.empty:
         return matched
+    if "origin" in matched:
+        if not fresh:
+            matched = matched[matched["origin"].fillna("library") != "discovery"]
+            if matched.empty:
+                return matched
     ordered = matched.drop_duplicates("key").sample(frac=1, random_state=seed).copy()
     if "served_count" not in ordered:
         ordered["served_count"] = 0
@@ -175,11 +185,16 @@ def assemble(matched: pd.DataFrame, *, minutes: float | None = 60.0, count: int 
     ordered = ordered.drop(columns=[c for c in ["_not_favorite"] if c in ordered])
     ordered["familiarity"] = familiarity(ordered).reindex(ordered.index)
 
-    # The less familiar half of the candidates counts as "fresh".
-    is_fresh = ordered["familiarity"] < ordered["familiarity"].median()
-    if not is_fresh.any() or is_fresh.all():  # no spread: split by rank instead
-        ranks = ordered["familiarity"].rank(method="first")
-        is_fresh = ranks <= len(ordered) / 2
+    discovered = (ordered["origin"].fillna("library") == "discovery"
+                  if "origin" in ordered else pd.Series(False, index=ordered.index))
+    if discovered.any():
+        is_fresh = discovered
+    else:
+        # No discoveries: the less familiar half of the library counts as fresh.
+        is_fresh = ordered["familiarity"] < ordered["familiarity"].median()
+        if not is_fresh.any() or is_fresh.all():  # no spread: split by rank instead
+            ranks = ordered["familiarity"].rank(method="first")
+            is_fresh = ranks <= len(ordered) / 2
     ordered["fresh"] = is_fresh
 
     if fresh is None:

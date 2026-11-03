@@ -115,7 +115,9 @@ pacemaker analyze my-run.fit
 | `report [--target]` | BPM coverage and candidate counts at tolerance 2, 3 and 4 |
 | `generate --target <spm>` | Write `playlist.csv` and `playlist.txt`; see options below |
 | `export-missing` / `import-bpm` | Dump songs with no BPM, fill them in, load them back |
+| `discover` | Find songs you do not have, by artists similar to yours |
 | `export-state` / `import-state` | State dump so a later run can resume |
+| `export-discovery` / `import-discovery` | Keep discovered songs between runs |
 | `export-catalog` | Static `web/catalog.json` for a hosted front-end |
 
 Add `--db path/to/file.db` to any command to use a different catalog.
@@ -125,7 +127,7 @@ Add `--db path/to/file.db` to any command to use a different catalog.
 | Option | Default | Meaning |
 |---|---|---|
 | `--minutes` | 60 | Stop at the track count that brings the total closest to this |
-| `--fresh` | off | Percent of tracks drawn from the ones you know least (0–100) |
+| `--fresh` | off | Percent of songs that are new to you, from `discover` (0–100) |
 | `--tolerance` | 3 | How far a track's BPM may be from your cadence |
 | `--count` | 30 | Fixed number of tracks instead; use with `--minutes 0` |
 | `--assume-seconds` | 210 | Length used for tracks whose duration is unknown |
@@ -177,35 +179,36 @@ Writing directly to Apple Music from an app needs MusicKit, which requires
 the Apple Developer Program (currently 99 USD/year). That is deliberately out
 of scope here.
 
-## Fresh and familiar
+## New songs
 
-`--fresh 30` asks for roughly 30% of the playlist to come from the songs you
-know least. "Know" is worked out from whichever of these your export
-carries, each ranked within your library and then averaged:
+`--fresh 30` asks for roughly 30% of the playlist to be **songs you do not
+have yet**. They come from `pacemaker discover`:
 
-| Signal | Available from |
-|---|---|
-| How often pacemaker has already played it to you | every export, after your first playlist |
-| Marked as favorite / liked / loved | transfer-service CSV, iTunes XML |
-| How many of your own playlists hold it | transfer-service CSV |
-| Play count | iTunes XML |
-| How long ago you added it | Spotify export, iTunes XML |
+1. **Your artists.** Ranked by how much of your library they fill. Songs in a
+   play-history playlist (Apple Music's *Replay 2026* or *Favourite Songs*,
+   Spotify's *On Repeat* or *Your Top Songs*) count five times, since they
+   show what you actually play now.
+2. **Similar artists.** Deezer's related artists for each of your top 30. An
+   artist suggested by several of yours ranks higher, one you have no songs
+   by gets a bonus, and one that is already among your main artists is
+   pushed down.
+3. **Their songs.** The top tracks of the 80 best-ranked similar artists,
+   minus anything already in your library, each checked once for BPM.
 
-Songs in a play-history playlist — Apple Music's *Replay 2026* or
-*Favourite Songs*, Spotify's *On Repeat* or *Your Top Songs* — always count as
-well known, whatever the other signals say.
+Discovered songs are kept in `discovery.csv`, so later runs only fetch what
+is new. If you later add one to your library, the next import claims it back
+as yours.
 
-The candidates for a playlist are split at the median of that score: the
-lower half is "fresh", the upper half "familiar". With a plain Apple Music
-transfer export, that works out as: songs you only have through a playlist
-you saved (and never added to your library one by one) are fresh; songs in
-your library are familiar. A signal that none of your
-songs carry is left out rather than counted as zero, so a thin export still
-works; it just has less to go on.
+If not enough discovered songs fit your cadence, the rest of the playlist
+comes from your library and the run says how many new songs it could find.
+Before `discover` has ever run, "new" falls back to the songs you know least
+in your own library — scored from playlists, favorites, play counts and
+added dates, whichever your export carries.
 
-"Fresh" means fresh *to you within your library*. pacemaker never adds songs
-you do not already have, which is why every track in the playlist is already
-in your account.
+New songs are not in your library, so the iOS Shortcut cannot find them. On
+the GitHub run page each one has a link that opens it in Apple Music, or
+import `playlist.csv` with TuneMyMusic or Soundiiz, which search the whole
+catalogue.
 
 **Rotation** is separate and always on. Every candidate is already within
 tolerance, and a BPM or two is inaudible while running, so pacemaker does
@@ -265,6 +268,7 @@ retried on every run.
 - [x] BPM lookup as a GitHub Actions workflow
 - [x] Hour-long playlists, rotation, and a fresh/familiar mix
 - [x] Spotify exports, durations, play counts and added dates
+- [x] Discovery: new songs by artists similar to yours
 - [ ] Hosted version: upload an export, get a playlist, no GitHub needed
 - [ ] Phase-aware ordering that follows the activity's cadence curve
 - [ ] Personal cadence profile from your last 10–20 runs
