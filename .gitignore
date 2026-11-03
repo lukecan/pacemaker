@@ -7,6 +7,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# your own library export stays in your copy, not in a pull request
-library/*
-!library/README.md
+# Your own library export lives in library/ and is committed to YOUR copy of
+# the repo, because the workflow needs it checked out. It is deliberately not
+# ignored here. Never send it upstream in a pull request.
