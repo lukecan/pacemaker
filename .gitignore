@@ -1,0 +1,12 @@
+*.db
+playlist.csv
+playlist.txt
+missing_bpm.csv
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# your own library export stays in your copy, not in a pull request
+library/*
+!library/README.md

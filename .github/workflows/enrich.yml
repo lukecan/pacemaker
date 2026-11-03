@@ -1,0 +1,88 @@
+name: Look up BPM
+
+# Runs in YOUR copy of the repo, against YOUR library, with YOUR API key.
+# Nothing is sent anywhere else. Results are committed back to your repo so
+# the next run resumes instead of starting over.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Where to look up BPM"
+        type: choice
+        default: deezer
+        options:
+          - deezer
+          - getsongbpm
+          - deezer,getsongbpm
+      limit:
+        description: "How many songs to try in this run"
+        default: "300"
+      delay:
+        description: "Seconds to wait between requests"
+        default: "0.7"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: look-up-bpm
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e .
+
+      - name: Find the library export
+        id: find
+        run: |
+          file=$(ls library/*.csv library/*.xml 2>/dev/null | head -1 || true)
+          if [ -z "$file" ]; then
+            echo "::error::No library export found. Add one .csv or .xml file to library/ first."
+            exit 1
+          fi
+          echo "Using $file"
+          echo "path=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Build the catalog and restore what is already known
+        run: |
+          pacemaker import-library "${{ steps.find.outputs.path }}"
+          if [ -f bpm_state.csv ]; then
+            pacemaker import-state bpm_state.csv
+          fi
+
+      - name: Look up missing BPM values
+        env:
+          GETSONGBPM_API_KEY: ${{ secrets.GETSONGBPM_API_KEY }}
+          PROVIDER: ${{ inputs.provider }}
+          LIMIT: ${{ inputs.limit }}
+          DELAY: ${{ inputs.delay }}
+        run: pacemaker enrich --provider "$PROVIDER" --limit "$LIMIT" --delay "$DELAY"
+
+      - name: Write the state file and the web catalog
+        run: |
+          mkdir -p web
+          pacemaker export-state
+          pacemaker export-catalog
+          pacemaker report
+
+      - name: Commit the results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bpm_state.csv web/catalog.json
+          if git diff --cached --quiet; then
+            echo "nothing changed"
+          else
+            git commit -m "chore: update BPM data [skip ci]"
+            git push
+          fi
