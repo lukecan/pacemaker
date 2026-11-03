@@ -153,6 +153,17 @@ entry.
 
 ## Getting the playlist into Apple Music or Spotify
 
+**Any service, via TuneMyMusic (recommended).** Every playlist is also written
+as `<name>.tunemymusic.csv`, in the same columns as a TuneMyMusic library
+export, ISRC included. Open
+[TuneMyMusic's file import](https://www.tunemymusic.com/transfer/csv-to-apple-music),
+upload it, and pick Apple Music, Spotify, YouTube Music, Deezer or Tidal as
+the destination. TuneMyMusic matches by ISRC, so you get the exact
+recordings, and new songs you do not have yet are found in the full catalogue.
+Writing to a music service directly needs that service's developer access
+(Apple's costs 99 USD a year; Spotify's is closed to individuals), which
+TuneMyMusic has and pacemaker deliberately does not.
+
 Because the candidates come from your own library, every selected song is
 already in your account — no catalogue search needed.
 

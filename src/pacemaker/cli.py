@@ -187,6 +187,20 @@ def cmd_generate(args):
     playlist["bpm"] = playlist["bpm"].round(1)
     playlist.to_csv(args.out, index=False)
 
+    # Same columns as a TuneMyMusic library export, so the file can be
+    # imported straight back through TuneMyMusic into any service.
+    from datetime import date as _date
+    transfer_path = args.out.rsplit(".", 1)[0] + ".tunemymusic.csv"
+    playlist_name = f"pacemaker {args.target:g} SPM {_date.today().isoformat()}"
+    pd.DataFrame({
+        "Track name": playlist["title"],
+        "Artist name": playlist["artist"],
+        "Album": playlist["album"].fillna(""),
+        "Playlist name": playlist_name,
+        "Type": "Playlist",
+        "ISRC": playlist["isrc"].fillna(""),
+    }).to_csv(transfer_path, index=False)
+
     text_path = args.out.rsplit(".", 1)[0] + ".txt"
     with open(text_path, "w", encoding="utf-8") as fh:
         for row in playlist.itertuples(index=False):
@@ -198,6 +212,7 @@ def cmd_generate(args):
     if unknown:
         length += f" (estimated; {unknown} track(s) had no known length)"
     print(f"\n{len(selected)} songs, {length} -> {args.out}")
+    print(f"for TuneMyMusic (any service) -> {transfer_path}")
     print(f"pipe-separated list for iOS Shortcuts -> {text_path}")
     if fresh is not None:
         new = int(selected["new"].sum())
