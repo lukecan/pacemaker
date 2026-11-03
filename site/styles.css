@@ -10,6 +10,7 @@
   --track: #1d4f91;      /* blue athletics track */
   --track-ink: #ffffff;
   --accent: #1d4f91;
+  --on-accent: #ffffff;
   --pin: #c8243b;        /* safety-pin red, for "new" only */
   --bib: #fbfcfe;        /* bibs stay paper-white in both themes */
   --bib-ink: #0e1a2b;
@@ -26,14 +27,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: #0b1320; --surface: #121c2c; --ink: #e7edf6; --muted: #98a8bf; --line: #24324a;
-    --track: #173f74; --accent: #6aa8f0; --pin: #ff5a6e; --bib-line: #b9c5d6;
+    --track: #173f74; --accent: #6aa8f0; --on-accent: #0b1320; --pin: #ff5a6e; --bib-line: #b9c5d6;
     --warn-bg: #3a2e0c; --warn-ink: #f7dc8d; --ok: #5ccf8f;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --paper: #0b1320; --surface: #121c2c; --ink: #e7edf6; --muted: #98a8bf; --line: #24324a;
-  --track: #173f74; --accent: #6aa8f0; --pin: #ff5a6e; --bib-line: #b9c5d6;
+  --track: #173f74; --accent: #6aa8f0; --on-accent: #0b1320; --pin: #ff5a6e; --bib-line: #b9c5d6;
   --warn-bg: #3a2e0c; --warn-ink: #f7dc8d; --ok: #5ccf8f;
   color-scheme: dark;
 }
@@ -143,14 +144,14 @@ summary { cursor: pointer; color: var(--accent); font-weight: 600; }
   font: 700 1.05rem/1 var(--body); padding: .65rem 1rem; border-radius: 999px; cursor: pointer;
   border: 2px solid var(--line); background: var(--paper); color: var(--ink);
 }
-.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 .fresh-out { font-weight: 600; margin: 0; }
 .hint { color: var(--muted); font-size: .9rem; margin: 0; }
 
 .btn {
   font: 700 1.05rem/1 var(--body); padding: .95rem 1.4rem; border-radius: 999px; cursor: pointer;
-  border: 2px solid var(--accent); background: var(--accent); color: #fff; text-decoration: none;
+  border: 2px solid var(--accent); background: var(--accent); color: var(--on-accent); text-decoration: none;
   display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
 }
 .btn.ghost { background: transparent; color: var(--accent); }

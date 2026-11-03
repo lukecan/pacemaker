@@ -207,6 +207,7 @@ async function run() {
   };
   items.library.textContent = t("phaseLibrary", 0, 0, 0, state.cadence);
   const list = h("ul", { class: "phases" }, items.library, state.fresh ? [items.artists, items.discover] : []);
+  window.scrollTo(0, 0);
   app.replaceChildren(h("section", { class: "progress", "aria-live": "polite" },
     h("h2", { text: t("progressTitle") }), h("div", { class: "lane-bar", role: "progressbar", "aria-label": t("progressTitle") }, bar),
     list, h("p", { class: "hint", text: t("progressNote") })));
@@ -237,6 +238,7 @@ async function run() {
     state.result = { ...result, cadence: state.cadence, minutes: state.minutes, lang: state.lang };
     state.shared = null;
     renderResult();
+    window.scrollTo(0, 0); // the build button sits low on a phone; show the bib, not mid-table
   } catch {
     app.replaceChildren(h("p", { class: "error", text: t("errGeneric") }),
       h("button", { type: "button", class: "btn ghost", onclick: renderMake }, t("build")));
