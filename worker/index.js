@@ -257,20 +257,43 @@ async function handleGallery(env, url) {
   const cadence = Number(url.searchParams.get("cadence"));
   const tolerance = Math.min(Math.max(Number(url.searchParams.get("tolerance")) || 3, 0), 20);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 24, 1), 60);
+  // Most liked first by default; ties and "new" fall back to the newest.
+  const order = url.searchParams.get("sort") === "new" ? "created_at DESC" : "likes DESC, created_at DESC";
+  const columns = "slug,name,lang,cadence,minutes,new_count,likes,json_array_length(tracks) AS count,created_at";
   let stmt;
   if (Number.isFinite(cadence) && cadence > 0) {
     stmt = env.DB.prepare(
-      `SELECT slug,name,lang,cadence,minutes,new_count,json_array_length(tracks) AS count,created_at
-       FROM playlists WHERE cadence BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?`,
+      `SELECT ${columns} FROM playlists WHERE cadence BETWEEN ? AND ? ORDER BY ${order} LIMIT ?`,
     ).bind(cadence - tolerance, cadence + tolerance, limit);
   } else {
-    stmt = env.DB.prepare(
-      `SELECT slug,name,lang,cadence,minutes,new_count,json_array_length(tracks) AS count,created_at
-       FROM playlists ORDER BY created_at DESC LIMIT ?`,
-    ).bind(limit);
+    stmt = env.DB.prepare(`SELECT ${columns} FROM playlists ORDER BY ${order} LIMIT ?`).bind(limit);
   }
   const { results } = await stmt.all();
   return json({ playlists: results });
+}
+
+async function voterId(request, slug) {
+  const client = request.headers.get("cf-connecting-ip") || "local";
+  const bytes = new TextEncoder().encode(`${client}|${slug}|pacemaker-like`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function handleLike(env, request, slug, payload) {
+  if (!/^[a-z2-9]{7}$/.test(slug)) return bad("not found", 404);
+  const exists = await env.DB.prepare(`SELECT slug FROM playlists WHERE slug = ?`).bind(slug).first();
+  if (!exists) return bad("not found", 404);
+  const voter = await voterId(request, slug);
+  const like = payload?.like !== false;
+  const change = like
+    ? env.DB.prepare(`INSERT OR IGNORE INTO likes (slug,voter,created_at) VALUES (?,?,?)`).bind(slug, voter, now())
+    : env.DB.prepare(`DELETE FROM likes WHERE slug = ? AND voter = ?`).bind(slug, voter);
+  await env.DB.batch([
+    change,
+    env.DB.prepare(`UPDATE playlists SET likes = (SELECT count(*) FROM likes WHERE slug = ?) WHERE slug = ?`).bind(slug, slug),
+  ]);
+  const row = await env.DB.prepare(`SELECT likes FROM playlists WHERE slug = ?`).bind(slug).first();
+  return json({ likes: row.likes, liked: like });
 }
 
 async function handleOne(env, slug) {
@@ -335,6 +358,8 @@ async function route(request, env, url) {
           case "/api/tracks": return await handleTracks(env, client, payload);
           case "/api/playlists": return await handleShare(env, request, payload);
         }
+        const like = url.pathname.match(/^\/api\/playlists\/([^/]+)\/like$/);
+        if (like) return await handleLike(env, request, like[1], payload);
       } else if (request.method === "GET") {
         if (url.pathname === "/api/playlists") return await handleGallery(env, url);
         const m = url.pathname.match(/^\/api\/playlists\/([^/]+)$/);

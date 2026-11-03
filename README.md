@@ -23,7 +23,10 @@ install: enter your cadence, drop in your library export, choose a length and
 how much new music you want, and download a playlist to import with a transfer
 service. Playlists get running-pun names (*Stride & Prejudice · Golden Hour
 No. 12*, *Uzun Koşu Uzun Hava · Sahil Turu No. 7*) and can be shared to a
-public gallery that anyone can browse by cadence.
+public gallery that anyone can browse by cadence. Visitors can like shared
+playlists; the gallery shows the most liked first, or the newest. Half-time
+songs (two steps per beat, 85 BPM at 170 SPM) are off unless the visitor ticks
+the option.
 
 - **Your library stays in your browser.** Only the titles of songs whose tempo
   is unknown are sent, to look them up.
@@ -31,6 +34,9 @@ public gallery that anyone can browse by cadence.
   so the first person to ask about a song pays for it and nobody else does.
 - **Shared playlists only carry metadata from Deezer**, never text from an
   upload, and sharing is limited per visitor per day.
+- **Likes need no account.** One like per visitor per playlist, enforced with a
+  SHA-256 of the client address and the playlist id; the address itself is
+  never stored.
 
 It runs on one Cloudflare Worker on the free plan: 100,000 requests a day,
 and each request stays under the 50 outbound calls a Worker may make.

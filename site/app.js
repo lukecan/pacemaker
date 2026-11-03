@@ -27,6 +27,8 @@ const state = {
   cadence: store.get("pacemaker.cadence", 170),
   minutes: store.get("pacemaker.minutes", 60),
   fresh: store.get("pacemaker.fresh", 30),
+  halfTime: store.get("pacemaker.halftime", false),
+  sort: store.get("pacemaker.sort", "top"),
   songs: null,
   fileError: null,
   result: null,
@@ -131,6 +133,12 @@ function renderMake() {
     updateBuild();
   };
   cadence.addEventListener("input", checkCadence);
+  const halfHint = h("p", { class: "hint", id: "halftime-hint", text: t("halfTimeOptionHint", state.cadence) });
+  const half = h("input", { type: "checkbox", id: "halftime", "aria-describedby": "halftime-hint" });
+  half.checked = state.halfTime;
+  half.addEventListener("change", () => { state.halfTime = half.checked; store.set("pacemaker.halftime", half.checked); });
+  cadence.addEventListener("input", () => { halfHint.textContent = t("halfTimeOptionHint", Number(cadence.value) || 170); });
+  const halfRow = h("div", {}, h("label", { class: "checkline", for: "halftime" }, half, h("span", { text: t("halfTimeOption") })), halfHint);
   const help = h("details", {},
     h("summary", { text: t("cadenceHelp") }),
     h("p", { class: "hint", text: t("cadenceHelpIntro") }),
@@ -197,7 +205,7 @@ function renderMake() {
   }
 
   app.append(
-    step(1, t("step1"), h("div", { class: "cadence-row" }, cadence, h("span", { class: "unit", id: "cadence-unit", text: t("cadenceUnit") })), note, help),
+    step(1, t("step1"), h("div", { class: "cadence-row" }, cadence, h("span", { class: "unit", id: "cadence-unit", text: t("cadenceUnit") })), note, halfRow, help),
     step(2, t("step2"), drop, status, h("p", { class: "privacy", text: t("privacy") }), exportHelp),
     step(3, t("step3"), chips),
     step(4, t("step4"), fresh, freshOut, h("p", { class: "hint", text: t("freshHint") })),
@@ -243,7 +251,7 @@ async function run() {
     const served = store.get("pacemaker.served", {});
     const result = await buildPlaylist({
       songs: state.songs, cadence: state.cadence, minutes: state.minutes, fresh: state.fresh / 100,
-      served, api, names, lang: state.lang, onProgress, seed: Math.floor(Math.random() * 2 ** 31),
+      served, api, names, lang: state.lang, onProgress, seed: Math.floor(Math.random() * 2 ** 31), halfTime: state.halfTime,
     });
     for (const tr of result.playlist) served[tr.key] = (served[tr.key] || 0) + 1;
     store.set("pacemaker.served", served);
@@ -354,24 +362,85 @@ function renderResult() {
   renderShare();
 }
 
+// -------------------------------------------------------------- likes
+const likedSet = () => new Set(store.get("pacemaker.liked", []));
+
+function heart() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", "M12 20.5s-7.5-4.6-9.3-9.2C1.4 8 3.4 4.5 6.9 4.5c2 0 3.6 1.2 5.1 3 1.5-1.8 3.1-3 5.1-3 3.5 0 5.5 3.5 4.2 6.8-1.8 4.6-9.3 9.2-9.3 9.2z");
+  svg.append(path);
+  return svg;
+}
+
+function likeButton(slug, count) {
+  let liked = likedSet().has(slug);
+  let n = Number(count) || 0;
+  const label = h("span", { text: t("likes", n) });
+  const btn = h("button", { type: "button", class: "like", "aria-pressed": String(liked), title: t(liked ? "unlike" : "like") }, heart(), label);
+  const paint = () => {
+    btn.setAttribute("aria-pressed", String(liked));
+    btn.title = t(liked ? "unlike" : "like");
+    label.textContent = t("likes", n);
+  };
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const before = { liked, n };
+    const remember = (on) => {
+      const set = likedSet();
+      if (on) set.add(slug); else set.delete(slug);
+      store.set("pacemaker.liked", [...set]);
+    };
+    liked = !liked;
+    n = Math.max(0, n + (liked ? 1 : -1));
+    remember(liked); // right away, so leaving the page mid-request keeps the state
+    paint();
+    btn.disabled = true;
+    try {
+      n = (await api.like(slug, liked)).likes;
+    } catch {
+      ({ liked, n } = before);
+      remember(liked);
+    } finally {
+      btn.disabled = false;
+      paint();
+    }
+  });
+  return btn;
+}
+
 // ------------------------------------------------------------ browse
 async function renderBrowse() {
   const input = h("input", { type: "number", id: "browse-cadence", inputmode: "numeric", min: "120", max: "220",
     value: String(store.get("pacemaker.browse", "") || ""), placeholder: t("browseAll") });
   const list = h("div", { class: "cards", "aria-live": "polite" });
+  const sorts = h("div", { class: "chips", role: "group" },
+    ["top", "new"].map((key) => h("button", {
+      type: "button", class: "chip", "aria-pressed": String(state.sort === key),
+      onclick: (e) => {
+        state.sort = key; store.set("pacemaker.sort", key);
+        for (const c of sorts.children) c.setAttribute("aria-pressed", String(c === e.currentTarget));
+        load();
+      },
+    }, t(key === "top" ? "sortTop" : "sortNew"))));
   const load = async () => {
     const v = Number(input.value) || null;
     store.set("pacemaker.browse", v || "");
     list.replaceChildren();
     try {
-      const { playlists } = await api.gallery(v);
+      const { playlists } = await api.gallery(v, 3, state.sort);
       if (!playlists.length) { list.replaceChildren(h("p", { class: "empty", text: t("browseEmpty") })); return; }
-      list.replaceChildren(...playlists.map((p) => h("a", { class: "card", href: pageUrl(`?p=${encodeURIComponent(p.slug)}`), "data-link": true },
-        h("div", { class: "bib" },
-          h("div", { class: "bib-strip" }, h("span", { text: t("bibHeader") }), h("span", { text: `${p.cadence} SPM` })),
-          h("div", { class: "bib-number", text: String(Math.round(p.cadence)) }),
-          h("div", { class: "bib-name", text: p.name }),
-          h("p", { class: "bib-meta", text: t("browseMeta", p.minutes, p.count, p.new_count) })))));
+      list.replaceChildren(...playlists.map((p) => h("div", { class: "card" },
+        h("a", { class: "card-link", href: pageUrl(`?p=${encodeURIComponent(p.slug)}`), "data-link": true },
+          h("div", { class: "bib" },
+            h("div", { class: "bib-strip" }, h("span", { text: t("bibHeader") }), h("span", { text: `${p.cadence} SPM` })),
+            h("div", { class: "bib-number", text: String(Math.round(p.cadence)) }),
+            h("div", { class: "bib-name", text: p.name }),
+            h("p", { class: "bib-meta", text: t("browseMeta", p.minutes, p.count, p.new_count) }))),
+        likeButton(p.slug, p.likes))));
     } catch {
       list.replaceChildren(h("p", { class: "error", text: t("errGeneric") }));
     }
@@ -380,7 +449,8 @@ async function renderBrowse() {
     h("div", { class: "browse-head" },
       h("h1", { text: t("browseTitle") }),
       h("label", { class: "field", for: "browse-cadence" }, t("browseCadence"), input),
-      h("button", { type: "button", class: "btn", onclick: load }, t("browseShow"))),
+      h("button", { type: "button", class: "btn", onclick: load }, t("browseShow")),
+      sorts),
     list);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
   load();
@@ -395,6 +465,7 @@ async function renderShared(slug) {
       bib({ cadence: p.cadence, name: p.name, seconds, count: p.tracks.length, newCount: p.new_count }),
       h("div", { class: "btn-row" },
         h("button", { type: "button", class: "btn", onclick: () => downloadCSV(p.tracks, p.name) }, t("download")),
+        likeButton(p.slug, p.likes),
         h("a", { class: "btn ghost", href: pageUrl(), "data-link": true, "data-nav": "make" }, t("makeYourOwn"))),
       importHow(),
       trackTable(p.tracks));

@@ -261,12 +261,25 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   border: 2px solid var(--line); background: var(--surface); color: var(--ink);
 }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 1rem; }
-.card { text-decoration: none; display: flex; }
-.card .bib { flex: 1; }
+.card { display: flex; flex-direction: column; gap: .5rem; }
+.card-link { text-decoration: none; display: flex; flex: 1; }
+.card-link .bib { flex: 1; }
+.like {
+  display: inline-flex; align-items: center; gap: .45rem; align-self: flex-start;
+  font: 600 .95rem/1 var(--body); padding: .55rem .85rem; border-radius: 999px; cursor: pointer;
+  border: 2px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.like svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.like[aria-pressed="true"] { border-color: var(--pin); color: var(--pin); }
+.like[aria-pressed="true"] svg { fill: currentColor; }
+.like:disabled { opacity: .7; cursor: default; }
+.btn-row .like { align-self: center; }
+.checkline { display: flex; gap: .6rem; align-items: center; font-weight: 600; cursor: pointer; }
+.checkline input { width: 1.2rem; height: 1.2rem; accent-color: var(--accent); margin: 0; }
 .card .bib-number { font-size: 4.2rem; margin-top: .6rem; }
 .card .bib-name { font-size: 1.15rem; margin-inline: 1.2rem; }
 .card .bib::before, .card .bib::after { top: 2.6rem; width: 9px; height: 9px; }
-.card:hover .bib { border-color: var(--accent); }
+.card-link:hover .bib { border-color: var(--accent); }
 .empty { color: var(--muted); }
 
 .footer { padding-block: 1.5rem 2.5rem; color: var(--muted); font-size: .88rem; border-top: 1px solid var(--line); }

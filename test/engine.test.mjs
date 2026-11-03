@@ -73,6 +73,15 @@ test("a second visitor with an overlapping library is served from the cache", as
   assert.equal(deezer.calls(), after);
 });
 
+test("half-time songs only when asked", async () => {
+  const { api } = wire();
+  const off = await buildPlaylist({ songs: library(800), cadence: 170, minutes: 45, fresh: 0.3, seed: 2, api, names, pause: 0 });
+  assert.equal(off.playlist.some((t) => t.match === "half-time"), false);
+  assert.ok(off.playlist.every((t) => Math.abs(t.bpm - 170) <= 3));
+  const on = await buildPlaylist({ songs: library(800), cadence: 170, minutes: 45, fresh: 0.3, seed: 2, api, names, pause: 0, halfTime: true });
+  assert.ok(on.playlist.some((t) => t.match === "half-time"));
+});
+
 test("no new songs when fresh is 0", async () => {
   const { api } = wire();
   const r = await buildPlaylist({ songs: library(600), cadence: 170, minutes: 45, fresh: 0, api, names, pause: 0 });

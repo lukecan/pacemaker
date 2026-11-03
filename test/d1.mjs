@@ -12,7 +12,10 @@ class Statement {
 
 export function makeD1() {
   const db = new DatabaseSync(":memory:");
-  db.exec(fs.readFileSync(new URL("../worker/migrations/0001_init.sql", import.meta.url), "utf8"));
+  const dir = new URL("../worker/migrations/", import.meta.url);
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+    db.exec(fs.readFileSync(new URL(file, dir), "utf8"));
+  }
   return {
     raw: db,
     prepare: (sql) => new Statement(db, sql),

@@ -22,8 +22,9 @@ export function makeApi(fetchImpl = fetch, base = "") {
     top: (artists) => post("/api/top", { artists }),
     tracks: (ids) => post("/api/tracks", { ids }),
     share: (data) => post("/api/playlists", data),
-    async gallery(cadence, tolerance = 3) {
-      const q = new URLSearchParams({ tolerance: String(tolerance) });
+    like: (slug, like = true) => post(`/api/playlists/${encodeURIComponent(slug)}/like`, { like }),
+    async gallery(cadence, tolerance = 3, sort = "top") {
+      const q = new URLSearchParams({ tolerance: String(tolerance), sort });
       if (cadence) q.set("cadence", String(cadence));
       const res = await fetchImpl(`${base}/api/playlists?${q}`);
       if (!res.ok) throw new Error("gallery");
@@ -64,7 +65,7 @@ async function drain(items, size, parallel, fn, { enough = () => false, retries 
 }
 
 export async function buildPlaylist({
-  songs, cadence, minutes = 60, fresh = 0.3, tolerance = 3, served = {}, seed = Date.now() % 2 ** 31,
+  songs, cadence, minutes = 60, fresh = 0.3, tolerance = 3, halfTime = false, served = {}, seed = Date.now() % 2 ** 31,
   api, names, lang = "en", onProgress = () => {}, maxLookups = 900, pause = 1500,
 }) {
   const perHour = (minutes * 60) / DEFAULT_TRACK_SECONDS;
@@ -74,7 +75,8 @@ export async function buildPlaylist({
   // ---- 1. your library: check tempos until there are enough to choose from
   const library = songs.map((s) => ({ ...s, origin: "library" }));
   const byKey = new Map(library.map((s) => [s.key, s]));
-  const fits = (s) => matchTracks([s], cadence, tolerance).length > 0;
+  // Half-time (two steps per beat) is opt-in: off, only direct tempo matches count.
+  const fits = (s) => matchTracks([s], cadence, tolerance, { halfTime }).length > 0;
   let known = library.filter((s) => s.bpm && fits(s)).length;
   const unknown = shuffle(library.filter((s) => !s.bpm), seed)
     .sort((a, b) => (served[a.key] || 0) - (served[b.key] || 0))
@@ -153,7 +155,7 @@ export async function buildPlaylist({
   }
 
   // ---- 3. assemble
-  const candidates = matchTracks([...library, ...discovered], cadence, tolerance);
+  const candidates = matchTracks([...library, ...discovered], cadence, tolerance, { halfTime });
   const playlist = assemble(candidates, { minutes, fresh, seed, served });
   const name = playlistName(playlistSeed(playlist.map((t) => t.key), cadence), lang, names);
   onProgress({ phase: "done" });

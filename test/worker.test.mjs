@@ -174,3 +174,37 @@ test("CORS: listed origins may call the API, others get no permission", async ()
     method: "OPTIONS", headers: { origin: "http://127.0.0.1:8800" } }), custom);
   assert.equal(local.status, 204);
 });
+
+
+async function sharedPlaylist(e, ip = "1.1.1.1") {
+  await post(e, "/api/tracks", { ids: ["14633829", "70322130", "1079668", "3089386", "3157689"] });
+  const keys = (await e.DB.prepare("SELECT key FROM songs WHERE status='found'").all()).results.map((x) => x.key);
+  return (await (await post(e, "/api/playlists", { lang: "en", cadence: 170, minutes: 60, tracks: keys.map((key) => ({ key })) }, ip)).json()).slug;
+}
+
+test("likes: one per visitor, can be taken back, unknown playlists refused", async () => {
+  const e = env();
+  const slug = await sharedPlaylist(e);
+  const like = (ip, body = {}) => post(e, `/api/playlists/${slug}/like`, body, ip);
+  assert.deepEqual(await (await like("5.5.5.5")).json(), { likes: 1, liked: true });
+  assert.deepEqual(await (await like("5.5.5.5")).json(), { likes: 1, liked: true }, "same visitor again");
+  assert.deepEqual(await (await like("6.6.6.6")).json(), { likes: 2, liked: true });
+  assert.deepEqual(await (await like("5.5.5.5", { like: false })).json(), { likes: 1, liked: false });
+  assert.equal((await post(e, "/api/playlists/abcdefg/like", {})).status, 404);
+  const stored = (await e.DB.prepare("SELECT voter FROM likes").all()).results.map((r) => r.voter);
+  assert.ok(stored.every((v) => /^[0-9a-f]{64}$/.test(v) && !v.includes("6.6.6.6")), "only hashes are stored");
+  assert.equal((await (await get(e, `/api/playlists/${slug}`)).json()).likes, 1);
+});
+
+test("gallery puts the most liked first, or the newest when asked", async () => {
+  const e = env();
+  const a = await sharedPlaylist(e, "1.1.1.1");
+  await new Promise((r) => setTimeout(r, 5));
+  const b = await sharedPlaylist(e, "1.1.1.2");
+  await post(e, `/api/playlists/${a}/like`, {}, "7.7.7.7");
+  const top = await (await get(e, "/api/playlists?cadence=170")).json();
+  assert.deepEqual(top.playlists.map((p) => p.slug), [a, b]);
+  assert.equal(top.playlists[0].likes, 1);
+  const fresh = await (await get(e, "/api/playlists?cadence=170&sort=new")).json();
+  assert.deepEqual(fresh.playlists.map((p) => p.slug), [b, a]);
+});

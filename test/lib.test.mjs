@@ -129,3 +129,13 @@ test("playlist names are stable, per language, and spread evenly", () => {
   const distinct = new Set(Array.from({ length: 5000 }, (_, i) => playlistName(`s${i}`, "en", names)));
   assert.ok(distinct.size > 4800);
 });
+
+test("interface texts: same keys in both languages and no key defined twice", () => {
+  const src = fs.readFileSync(new URL("../site/lib/i18n.js", import.meta.url), "utf8");
+  for (const lang of ["en", "tr"]) {
+    const block = src.split(new RegExp(`^  ${lang}: \\{`, "m"))[1].split(/^  \},?$/m)[0];
+    const keys = [...block.matchAll(/^    ([A-Za-z0-9]+):/gm)].map((m) => m[1]);
+    const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
+    assert.deepEqual(dupes, [], `${lang} defines ${dupes.join(", ")} twice`);
+  }
+});
