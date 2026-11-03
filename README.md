@@ -49,6 +49,22 @@ and each request stays under the 50 outbound calls a Worker may make.
 
 After that, every change to `site/` or `worker/` deploys itself.
 
+### Serving the page from another site
+
+The page is static, so another site can host it under a sub-path while the
+Worker keeps serving the API. `tools/embed.py` copies `site/`, points it at the
+Worker and allows that connection in the page's Content Security Policy:
+
+```bash
+python3 tools/embed.py ../my-site/pacemaker /pacemaker/ https://pacemaker.example.workers.dev
+```
+
+The Worker only answers browsers from origins listed in `ALLOWED_ORIGINS`
+(default: `https://mertcangenc.com,https://www.mertcangenc.com`). Views use the
+query string (`?browse`, `?p=<id>`), so the host needs no rewrite rules. Fonts
+are served from `site/fonts/` (SIL OFL 1.1); the page makes no third-party
+requests.
+
 ### Running it locally
 
 ```bash

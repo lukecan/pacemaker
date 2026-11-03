@@ -4,8 +4,14 @@ import { STRINGS } from "./lib/i18n.js";
 import { loadLibrary } from "./lib/library.js";
 import { DEFAULT_TRACK_SECONDS, playlistSeconds } from "./lib/match.js";
 
-const api = makeApi();
+// The page can live at the site root (workers.dev) or under a sub-path
+// (mertcangenc.com/pacemaker/). Everything is resolved against <base>, and the
+// API origin comes from <meta name="pacemaker-api"> ("" = same origin).
+const BASE = new URL(document.baseURI);
+const API_ORIGIN = (document.querySelector('meta[name="pacemaker-api"]')?.content || "").replace(/\/$/, "");
+const api = makeApi(fetch, API_ORIGIN);
 const app = document.getElementById("app");
+const pageUrl = (query = "") => new URL(query ? `./${query}` : "./", BASE).href;
 let names = null;
 
 // ------------------------------------------------------------ storage
@@ -54,19 +60,25 @@ function applyStatic() {
 }
 
 // ------------------------------------------------------------ router
-function navigate(path) {
-  if (path !== location.pathname) history.pushState({}, "", path);
+function navigate(href) {
+  if (href !== location.href) history.pushState({}, "", href);
   route();
 }
 
+function currentView() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("p")) return ["playlist", q.get("p")];
+  if (q.has("browse")) return ["browse"];
+  return ["make"];
+}
+
 function route() {
-  const path = location.pathname;
-  const view = path.startsWith("/browse") ? "browse" : path.startsWith("/p/") ? "playlist" : "make";
+  const [view, slug] = currentView();
   for (const a of document.querySelectorAll("[data-nav]")) {
     if (a.dataset.nav === view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
   if (view === "browse") renderBrowse();
-  else if (view === "playlist") renderShared(decodeURIComponent(path.slice(3)));
+  else if (view === "playlist") renderShared(slug);
   else if (state.result) renderResult();
   else renderMake();
   window.scrollTo(0, 0);
@@ -76,8 +88,8 @@ document.addEventListener("click", (e) => {
   const a = e.target.closest("a[data-link]");
   if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
   e.preventDefault();
-  if (a.getAttribute("href") === "/") state.result = null;
-  navigate(a.getAttribute("href"));
+  if (a.dataset.nav === "make" || a.classList.contains("wordmark")) state.result = null;
+  navigate(a.href);
 });
 window.addEventListener("popstate", route);
 
@@ -227,7 +239,7 @@ async function run() {
   };
 
   try {
-    names ||= await (await fetch("/lib/names.json")).json();
+    names ||= await (await fetch(new URL("lib/names.json", BASE))).json();
     const served = store.get("pacemaker.served", {});
     const result = await buildPlaylist({
       songs: state.songs, cadence: state.cadence, minutes: state.minutes, fresh: state.fresh / 100,
@@ -304,15 +316,11 @@ function renderResult() {
   const shareBtn = h("button", { type: "button", class: "btn ghost", onclick: async () => {
     shareBtn.disabled = true;
     try {
-      const res = await fetch("/api/playlists", { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lang: r.lang, cadence: r.cadence, minutes: Math.max(10, Math.round(seconds / 60)),
-          tracks: r.playlist.map((x) => ({ key: x.key, match: x.match, isNew: x.origin === "discovery" })) }) });
-      if (res.status === 429) throw new Error("limit");
-      if (!res.ok) throw new Error("share");
-      state.shared = await res.json();
+      state.shared = await api.share({ lang: r.lang, cadence: r.cadence, minutes: Math.max(10, Math.round(seconds / 60)),
+        tracks: r.playlist.map((x) => ({ key: x.key, match: x.match, isNew: x.origin === "discovery" })) });
       renderShare();
     } catch (err) {
-      shareArea.replaceChildren(h("p", { class: "error", text: t(err.message === "limit" ? "errShareLimit" : "errGeneric") }));
+      shareArea.replaceChildren(h("p", { class: "error", text: t(/ 429$/.test(err.message) ? "errShareLimit" : "errGeneric") }));
       shareBtn.disabled = false;
     }
   } }, t("share"));
@@ -320,12 +328,12 @@ function renderResult() {
   function renderShare() {
     if (!state.shared) return;
     shareBtn.hidden = true;
-    const url = `${location.origin}/p/${state.shared.slug}`;
+    const url = pageUrl(`?p=${encodeURIComponent(state.shared.slug)}`);
     const copy = h("button", { type: "button", class: "btn ghost", onclick: async () => {
       try { await navigator.clipboard.writeText(url); copy.textContent = t("copied"); } catch { /* select instead */ }
     } }, t("copy"));
     shareArea.replaceChildren(h("div", { class: "share-box" }, h("span", { text: t("shared") }),
-      h("a", { href: `/p/${state.shared.slug}`, "data-link": true }, h("code", { text: url })), copy));
+      h("a", { href: url, "data-link": true }, h("code", { text: url })), copy));
   }
 
   const notes = [];
@@ -358,7 +366,7 @@ async function renderBrowse() {
     try {
       const { playlists } = await api.gallery(v);
       if (!playlists.length) { list.replaceChildren(h("p", { class: "empty", text: t("browseEmpty") })); return; }
-      list.replaceChildren(...playlists.map((p) => h("a", { class: "card", href: `/p/${p.slug}`, "data-link": true },
+      list.replaceChildren(...playlists.map((p) => h("a", { class: "card", href: pageUrl(`?p=${encodeURIComponent(p.slug)}`), "data-link": true },
         h("div", { class: "bib" },
           h("div", { class: "bib-strip" }, h("span", { text: t("bibHeader") }), h("span", { text: `${p.cadence} SPM` })),
           h("div", { class: "bib-number", text: String(Math.round(p.cadence)) }),
@@ -387,11 +395,11 @@ async function renderShared(slug) {
       bib({ cadence: p.cadence, name: p.name, seconds, count: p.tracks.length, newCount: p.new_count }),
       h("div", { class: "btn-row" },
         h("button", { type: "button", class: "btn", onclick: () => downloadCSV(p.tracks, p.name) }, t("download")),
-        h("a", { class: "btn ghost", href: "/", "data-link": true }, t("makeYourOwn"))),
+        h("a", { class: "btn ghost", href: pageUrl(), "data-link": true, "data-nav": "make" }, t("makeYourOwn"))),
       importHow(),
       trackTable(p.tracks));
   } catch {
-    app.append(h("p", { class: "note", text: t("notFound") }), h("a", { class: "btn", href: "/", "data-link": true }, t("makeYourOwn")));
+    app.append(h("p", { class: "note", text: t("notFound") }), h("a", { class: "btn", href: pageUrl(), "data-link": true, "data-nav": "make" }, t("makeYourOwn")));
   }
 }
 

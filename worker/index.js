@@ -280,13 +280,49 @@ async function handleOne(env, slug) {
   return json({ ...row, tracks: JSON.parse(row.tracks) });
 }
 
+// -------------------------------------------------------------------- CORS
+// The page may be served from another site (mertcangenc.com/pacemaker/), so
+// browsers there need permission to call this API. Only listed origins get it.
+
+const DEFAULT_ORIGINS = "https://mertcangenc.com,https://www.mertcangenc.com";
+
+function corsHeaders(request, env) {
+  const origin = request.headers.get("origin");
+  if (!origin) return null;
+  const allowed = String(env.ALLOWED_ORIGINS || DEFAULT_ORIGINS).split(",").map((o) => o.trim()).filter(Boolean);
+  if (!allowed.includes(origin)) return null;
+  return {
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "86400",
+    vary: "origin",
+  };
+}
+
+function withCors(response, cors) {
+  if (!cors) return response;
+  const out = new Response(response.body, response);
+  for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
+  return out;
+}
+
 // ------------------------------------------------------------------ router
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    const cors = corsHeaders(request, env);
+    if (request.method === "OPTIONS") {
+      return cors ? new Response(null, { status: 204, headers: cors }) : new Response(null, { status: 403 });
+    }
+    return withCors(await route(request, env, url), cors);
+  },
+};
 
+async function route(request, env, url) {
+  {
     const client = makeClient(env.DEEZER_BASE || "https://api.deezer.com");
     try {
       if (request.method === "POST") {
@@ -309,5 +345,5 @@ export default {
     } catch (err) {
       return bad(`server error: ${err && err.message ? err.message : "unknown"}`, 500);
     }
-  },
-};
+  }
+}

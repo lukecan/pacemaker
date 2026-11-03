@@ -150,3 +150,27 @@ test("bad input is refused without touching Deezer", async () => {
   assert.equal(calls.length, 0);
   assert.equal(await (await get(e, "/somewhere")).text(), "asset");
 });
+
+
+test("CORS: listed origins may call the API, others get no permission", async () => {
+  const e = env();
+  const preflight = (origin) => worker.fetch(new Request("https://p.test/api/bpm", {
+    method: "OPTIONS", headers: { origin, "access-control-request-method": "POST" } }), e);
+  const ok = await preflight("https://mertcangenc.com");
+  assert.equal(ok.status, 204);
+  assert.equal(ok.headers.get("access-control-allow-origin"), "https://mertcangenc.com");
+  assert.match(ok.headers.get("access-control-allow-headers"), /content-type/);
+  assert.equal((await preflight("https://evil.example")).status, 403);
+
+  const res = await worker.fetch(new Request("https://p.test/api/playlists", { headers: { origin: "https://www.mertcangenc.com" } }), e);
+  assert.equal(res.headers.get("access-control-allow-origin"), "https://www.mertcangenc.com");
+  const other = await worker.fetch(new Request("https://p.test/api/playlists", { headers: { origin: "https://evil.example" } }), e);
+  assert.equal(other.headers.get("access-control-allow-origin"), null);
+  const same = await get(e, "/api/health");
+  assert.equal(same.headers.get("access-control-allow-origin"), null);
+
+  const custom = { ...e, ALLOWED_ORIGINS: "http://127.0.0.1:8800" };
+  const local = await worker.fetch(new Request("https://p.test/api/bpm", {
+    method: "OPTIONS", headers: { origin: "http://127.0.0.1:8800" } }), custom);
+  assert.equal(local.status, 204);
+});

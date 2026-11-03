@@ -3,22 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- When the site is served under a sub-path (mertcangenc.com/pacemaker/), the
+     embed script rewrites this base and the API origin below. -->
+<base href="/">
+<meta name="pacemaker-api" content="">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>pacemaker</title>
 <meta name="description" content="Hour-long running playlists from your own music, at the tempo of your stride.">
 <meta name="theme-color" content="#1d4f91">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
-<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/big-shoulders-display-latin-900-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="masthead">
   <div class="masthead-inner">
-    <a class="wordmark" href="/" data-link>pace<span>maker</span></a>
+    <a class="wordmark" href="./" data-link>pace<span>maker</span></a>
     <nav class="nav" aria-label="Main">
-      <a href="/" data-link data-nav="make" data-i18n="navMake">Make yours</a>
-      <a href="/browse" data-link data-nav="browse" data-i18n="navBrowse">Browse playlists</a>
+      <a href="./" data-link data-nav="make" data-i18n="navMake">Make yours</a>
+      <a href="./?browse" data-link data-nav="browse" data-i18n="navBrowse">Browse playlists</a>
       <button type="button" class="lang" id="lang" data-i18n="langSwitch">Türkçe</button>
     </nav>
   </div>
@@ -33,6 +37,6 @@
   <p><a href="https://github.com/lukecan/pacemaker" data-i18n="source">Source code</a> · <a href="https://mertcangenc.com">mertcangenc.com</a></p>
 </footer>
 
-<script type="module" src="/app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
