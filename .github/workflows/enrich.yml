@@ -38,7 +38,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: pacemaker-state
+  group: pacemaker-data
   cancel-in-progress: false
 
 jobs:
@@ -46,7 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
+      # Always start from the latest main, not the commit that triggered the
+      # run: an earlier run may have saved BPM results since then.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:

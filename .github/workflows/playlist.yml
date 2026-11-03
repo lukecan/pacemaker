@@ -28,7 +28,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: pacemaker-state
+  group: pacemaker-data
   cancel-in-progress: false
 
 jobs:
