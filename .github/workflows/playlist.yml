@@ -4,6 +4,11 @@ name: Make a playlist
 # The result is shown on the run page and committed under playlists/.
 
 on:
+  # Also runs by itself, with the defaults below, after every successful
+  # BPM lookup.
+  workflow_run:
+    workflows: ["Look up BPM"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       cadence:
@@ -28,9 +33,12 @@ concurrency:
 
 jobs:
   playlist:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -56,10 +64,10 @@ jobs:
       - name: Build the playlist
         id: build
         env:
-          CADENCE: ${{ inputs.cadence }}
-          MINUTES: ${{ inputs.minutes }}
-          FRESH: ${{ inputs.fresh }}
-          TOLERANCE: ${{ inputs.tolerance }}
+          CADENCE: ${{ inputs.cadence || '170' }}
+          MINUTES: ${{ inputs.minutes || '60' }}
+          FRESH: ${{ inputs.fresh || '30' }}
+          TOLERANCE: ${{ inputs.tolerance || '3' }}
         run: |
           mkdir -p playlists
           name="playlists/$(date -u +%Y-%m-%d)-${CADENCE}spm"
@@ -77,5 +85,6 @@ jobs:
             echo "nothing changed"
           else
             git commit -m "chore: new playlist [skip ci]"
+            git pull --rebase origin main
             git push
           fi

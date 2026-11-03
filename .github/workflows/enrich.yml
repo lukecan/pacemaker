@@ -5,6 +5,10 @@ name: Look up BPM
 # the next run resumes instead of starting over.
 
 on:
+  # Runs by itself whenever a library export is added or replaced.
+  push:
+    branches: [main]
+    paths: ["library/**"]
   workflow_dispatch:
     inputs:
       provider:
@@ -67,10 +71,10 @@ jobs:
       - name: Look up missing BPM values
         env:
           GETSONGBPM_API_KEY: ${{ secrets.GETSONGBPM_API_KEY }}
-          PROVIDER: ${{ inputs.provider }}
-          LIMIT: ${{ inputs.limit }}
-          DELAY: ${{ inputs.delay }}
-          RETRY: ${{ inputs.retry_misses }}
+          PROVIDER: ${{ inputs.provider || 'deezer' }}
+          LIMIT: ${{ inputs.limit || '5000' }}
+          DELAY: ${{ inputs.delay || '0.7' }}
+          RETRY: ${{ inputs.retry_misses || false }}
         run: |
           extra=""
           if [ "$RETRY" = "true" ]; then extra="--retry-misses"; fi
@@ -92,5 +96,6 @@ jobs:
             echo "nothing changed"
           else
             git commit -m "chore: update BPM data [skip ci]"
+            git pull --rebase origin main
             git push
           fi
