@@ -11,7 +11,24 @@ reading wins and the chosen one is reported in the ``match`` column.
 """
 from __future__ import annotations
 
+import re
+
 import pandas as pd
+
+#: Playlists the streaming service builds from what you actually play or
+#: love. Being in one means the listener knows the song well, whatever else
+#: the export says.
+HEAVY_ROTATION = re.compile(
+    r"^\s*(replay\s*(\d{4}|all\s*time)?|favou?rite\s*songs|heavy\s*rotation.*"
+    r"|on\s*repeat|repeat\s*rewind|your\s*top\s*songs.*|liked\s*songs|loved\s*tracks)\s*$",
+    re.IGNORECASE,
+)
+
+
+def in_heavy_rotation(playlists) -> bool:
+    if not isinstance(playlists, str) or not playlists:
+        return False
+    return any(HEAVY_ROTATION.match(name) for name in playlists.split(";"))
 
 
 def match_tracks(df: pd.DataFrame, target: float, tolerance: float = 2.0,
@@ -80,6 +97,10 @@ def familiarity(df: pd.DataFrame) -> pd.Series:
 
     Signals that no track in the catalog has are left out of the average,
     rather than counted as zero for everyone.
+
+    A track in a play-history playlist (Apple's "Replay 2026" or "Favourite
+    Songs", Spotify's "On Repeat" or "Your Top Songs") is treated as well
+    known regardless of the other signals.
     """
     if df.empty:
         return pd.Series(dtype=float)
@@ -98,7 +119,8 @@ def familiarity(df: pd.DataFrame) -> pd.Series:
 
     if "playlists" in df:
         counts = df["playlists"].fillna("").map(
-            lambda s: 0 if not s else len([p for p in str(s).split(";") if p.strip()]))
+            lambda s: 0 if not s else len([p for p in str(s).split(";")
+                                           if p.strip() and not HEAVY_ROTATION.match(p)]))
         if counts.gt(0).any() and counts.nunique() > 1:
             parts.append(counts.clip(upper=3) / 3.0)
 
@@ -113,9 +135,12 @@ def familiarity(df: pd.DataFrame) -> pd.Series:
             # added longer ago -> more familiar; unknown dates sit in the middle
             parts.append(ranked(-dates.astype("int64").where(dates.notna())).fillna(0.5))
 
-    if not parts:
-        return pd.Series(0.5, index=df.index)
-    return pd.concat(parts, axis=1).mean(axis=1)
+    score = (pd.concat(parts, axis=1).mean(axis=1) if parts
+             else pd.Series(0.5, index=df.index))
+    if "playlists" in df:
+        heavy = df["playlists"].map(in_heavy_rotation).astype(bool)
+        score = score.where(~heavy, score.clip(lower=0.95))
+    return score
 
 
 def assemble(matched: pd.DataFrame, *, minutes: float | None = 60.0, count: int | None = None,

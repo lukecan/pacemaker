@@ -191,8 +191,15 @@ carries, each ranked within your library and then averaged:
 | Play count | iTunes XML |
 | How long ago you added it | Spotify export, iTunes XML |
 
+Songs in a play-history playlist — Apple Music's *Replay 2026* or
+*Favourite Songs*, Spotify's *On Repeat* or *Your Top Songs* — always count as
+well known, whatever the other signals say.
+
 The candidates for a playlist are split at the median of that score: the
-lower half is "fresh", the upper half "familiar". A signal that none of your
+lower half is "fresh", the upper half "familiar". With a plain Apple Music
+transfer export, that works out as: songs you only have through a playlist
+you saved (and never added to your library one by one) are fresh; songs in
+your library are familiar. A signal that none of your
 songs carry is left out rather than counted as zero, so a thin export still
 works; it just has less to go on.
 

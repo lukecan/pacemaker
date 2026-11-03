@@ -98,6 +98,23 @@ def test_familiarity_combines_favorites_plays_and_age():
     assert score[0] > score[1] > score[2]
 
 
+@pytest.mark.parametrize("name", ["Replay 2026", "Replay All Time", "Favourite Songs",
+                                  "Favorite Songs", "On Repeat", "Your Top Songs 2025"])
+def test_play_history_playlists_mean_well_known(name):
+    df = candidates(4, favorite=[False, False, True, True],
+                    playlists=[name, "Soul 45", "", "Soul 45"])
+    score = familiarity(df).tolist()
+    assert score[0] >= 0.95       # only in Replay, still well known
+    assert score[1] < 0.5         # only in an editorial playlist: fresh
+
+
+def test_ordinary_playlist_named_like_replay_is_not_matched():
+    from pacemaker.matching import in_heavy_rotation
+    assert not in_heavy_rotation("Replay Value Mixtape")
+    assert not in_heavy_rotation("Songs I replay at night")
+    assert in_heavy_rotation("Soul 45; Replay 2024")
+
+
 @pytest.mark.parametrize("share", [0.0, 0.3, 0.5, 1.0])
 def test_fresh_share_is_respected(share):
     df = candidates(60, served_count=list(range(60)))
