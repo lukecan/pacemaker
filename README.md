@@ -145,8 +145,10 @@ step frequency is:
 
 $$\text{SPM} = (\text{cadence} + \text{fractional\_cadence}) \times 2$$
 
-An activity whose Garmin Connect summary says 84 is actually 168 SPM. Getting
-this wrong puts everything out by a factor of two.
+This matters only for the file. Garmin defines cadence as total steps
+"counting both feet", so the watch and Garmin Connect already show the
+doubled figure — around 170, not 85. The raw FIT field is the one that holds
+85, and reading it without doubling puts everything out by a factor of two.
 
 A track fits a target cadence two ways:
 
