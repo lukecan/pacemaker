@@ -77,3 +77,29 @@ jobs:
           fi
           echo "### pacemaker is live" >> "$GITHUB_STEP_SUMMARY"
           echo "$url" >> "$GITHUB_STEP_SUMMARY"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+        id: deploy
+
+      - name: Check the live site against real Deezer
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # a new workers.dev address can take a minute to answer
+          for i in $(seq 1 24); do
+            curl -sf "$URL/api/health" >/dev/null && break
+            sleep 5
+          done
+          curl -sf "$URL/api/health"
+          curl -sf "$URL/" | grep -q "<title>pacemaker</title>" || { echo "::error::home page missing"; exit 1; }
+          body='{"songs":[{"key":"GBUM70603730","title":"Rehab","artist":"Amy Winehouse","isrc":"GBUM70603730"},{"key":"africa|toto","title":"Africa","artist":"Toto"}]}'
+          res=$(curl -sf -X POST "$URL/api/bpm" -H 'content-type: application/json' -d "$body")
+          echo "$res"
+          echo "$res" | jq -e '.results.GBUM70603730.bpm > 140 and .results.GBUM70603730.bpm < 150' >/dev/null \
+            || { echo "::error::live BPM lookup did not return Rehab's tempo"; exit 1; }
+          echo "$res" | jq -e '.results["africa|toto"].bpm > 85' >/dev/null \
+            || { echo "::error::live search lookup failed for Africa"; exit 1; }
+          rel=$(curl -sf -X POST "$URL/api/related" -H 'content-type: application/json' -d '{"artists":["The Strokes"]}')
+          echo "$rel" | jq -c '.artists[0].related[:5] | map(.name)'
+          echo "$rel" | jq -e '.artists[0].related | length > 3' >/dev/null || { echo "::error::related artists empty"; exit 1; }
+          echo "Live checks passed: Rehab $(echo "$res" | jq '.results.GBUM70603730.bpm') BPM" >> "$GITHUB_STEP_SUMMARY"
