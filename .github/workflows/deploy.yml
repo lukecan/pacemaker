@@ -102,4 +102,12 @@ jobs:
           rel=$(curl -sf -X POST "$URL/api/related" -H 'content-type: application/json' -d '{"artists":["The Strokes"]}')
           echo "$rel" | jq -c '.artists[0].related[:5] | map(.name)'
           echo "$rel" | jq -e '.artists[0].related | length > 3' >/dev/null || { echo "::error::related artists empty"; exit 1; }
+          cors=$(curl -s -o /dev/null -D - -X OPTIONS "$URL/api/bpm" -H "Origin: https://mertcangenc.com" -H "Access-Control-Request-Method: POST" | tr -d '\r' | grep -i '^access-control-allow-origin:' || true)
+          echo "$cors"
+          echo "$cors" | grep -qi 'https://mertcangenc.com' || { echo "::error::mertcangenc.com is not allowed to call the API"; exit 1; }
+          page=$(curl -sfL https://mertcangenc.com/pacemaker/ || true)
+          if [ -n "$page" ]; then
+            echo "$page" | grep -q "connect-src 'self' $URL" || { echo "::error::mertcangenc.com/pacemaker does not point at $URL"; exit 1; }
+            echo "mertcangenc.com/pacemaker points at $URL" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "Live checks passed: Rehab $(echo "$res" | jq '.results.GBUM70603730.bpm') BPM" >> "$GITHUB_STEP_SUMMARY"
